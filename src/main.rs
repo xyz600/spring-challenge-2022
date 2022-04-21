@@ -69,7 +69,7 @@ macro_rules! input_old {
     };
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 struct Point {
     y: i32,
     x: i32,
@@ -84,6 +84,17 @@ impl Point {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         dx * dx + dy * dy
+    }
+}
+
+impl std::ops::Add<Self> for Point {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Point {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
     }
 }
 
@@ -171,6 +182,13 @@ struct Monster {
     threat_state: MonsterThreatState,
 }
 
+impl Monster {
+    fn next_pos(&self) -> Point {
+        self.pos + self.v
+    }
+}
+
+#[derive(Clone, Copy)]
 enum Action {
     Wait,
     Move { point: Point },
@@ -185,33 +203,82 @@ impl Action {
     }
 }
 
-struct Solver {}
+struct Solver {
+    // このターンで向かうべき位置があれば覚えておく
+    target: Vec<Option<Point>>,
+}
 
 impl Solver {
+    fn new(hero_size: usize) -> Solver {
+        Solver {
+            target: vec![None; hero_size],
+        }
+    }
+
+    fn hero_size(&self) -> usize {
+        self.target.len()
+    }
+
     fn solve(&mut self, board: &Board) -> Vec<Action> {
-        let mut threat_monster_list = vec![];
-        for (idx, monster) in board.monster_list.iter().enumerate() {
-            if monster.threat_state.threat_player() {
-                threat_monster_list.push(idx);
+        let mut ret = vec![Action::Wait; self.hero_size()];
+
+        let mut is_already_target = vec![false; board.monster_list.len()];
+
+        // 既にtarget があるなら、見つけて登録
+        for hero_id in 0..self.hero_size() {
+            if let Some(target) = self.target[hero_id] {
+                let mut find = false;
+                for (monster_index, monster) in board.monster_list.iter().enumerate() {
+                    if monster.threat_state.threat_player() && monster.pos == target {
+                        is_already_target[monster_index] = true;
+                        self.target[hero_id] = Some(monster.next_pos());
+                        ret[hero_id] = Action::Move {
+                            point: monster.next_pos(),
+                        };
+                        find = true;
+                        break;
+                    }
+                }
+                if !find {
+                    // 消滅しているので、解除
+                    self.target[hero_id] = None;
+                }
             }
         }
-        // 基地に近い順に sort
-        threat_monster_list.sort_by_key(|i| {
-            board.player.base.distance2(&board.monster_list[*i].pos);
-        });
 
-        let mut ret = vec![];
-        // target がいるならそこに向かう
-        for i in 0..3.min(threat_monster_list.len()) {
-            let target = &board.monster_list[threat_monster_list[i]];
-            ret.push(Action::Move { point: target.pos })
+        // 先頭から順に、近くの危険生物を見つけて、排除
+        for hero_id in 0..self.hero_size() {
+            if let None = self.target[hero_id] {
+                let hero = &board.player.hero_list[hero_id];
+
+                let mut nearest_monster = std::usize::MAX;
+                let mut nearest_distance = std::i32::MAX;
+
+                for (monster_index, monster) in board.monster_list.iter().enumerate() {
+                    let dist = monster.pos.distance2(&hero.pos);
+                    if !is_already_target[monster_index]
+                        && monster.threat_state.threat_player()
+                        && (dist < nearest_distance)
+                    {
+                        nearest_monster = monster_index;
+                        nearest_distance = dist;
+                    }
+                }
+                if nearest_monster < board.monster_list.len() {
+                    let monster = &board.monster_list[nearest_monster as usize];
+                    self.target[hero_id] = Some(monster.next_pos());
+                    ret[hero_id] = Action::Move {
+                        point: monster.next_pos(),
+                    };
+                    is_already_target[nearest_monster] = true;
+                } else {
+                    ret[hero_id] = Action::Move {
+                        point: board.player.base,
+                    };
+                }
+            }
         }
-        // 暇ならとりあえず基地に戻る
-        while ret.len() < 3 {
-            ret.push(Action::Move {
-                point: board.player.base,
-            });
-        }
+
         ret
     }
 }
@@ -227,7 +294,7 @@ fn main() {
         heroes_per_player: usize,
     }
 
-    let mut solver = Solver {};
+    let mut solver = Solver::new(heroes_per_player);
 
     // game loop
     loop {
