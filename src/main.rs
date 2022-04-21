@@ -78,6 +78,8 @@ struct Board {
 struct Player {
     health: i32,
     mana: i32,
+    base_x: i32,
+    base_y: i32,
     hero_list: Vec<Hero>,
 }
 
@@ -87,6 +89,8 @@ impl Player {
             health: 0,
             mana: 0,
             hero_list: vec![],
+            base_x: 0,
+            base_y: 0,
         }
     }
 }
@@ -154,13 +158,40 @@ struct Monster {
     threat_state: MonsterThreatState,
 }
 
+enum Action {
+    Wait,
+    Move { x: i32, y: i32 },
+}
+
+impl Action {
+    fn print(&self) {
+        match *self {
+            Action::Wait => println!("WAIT"),
+            Action::Move { x, y } => println!("MOVE {} {}", x, y),
+        }
+    }
+}
+
+struct Solver {}
+
+impl Solver {
+    fn solve(&mut self, board: &Board) -> Vec<Action> {
+        vec![Action::Wait, Action::Wait, Action::Wait]
+    }
+}
+
+const MAX_X: i32 = 17630;
+const MAX_Y: i32 = 9000;
+
 fn main() {
     input_old! {
         line_num: 2,
         base_x: i32,
         base_y: i32,
-        heroes_per_player: i32,
+        heroes_per_player: usize,
     }
+
+    let mut solver = Solver {};
 
     // game loop
     loop {
@@ -178,9 +209,13 @@ fn main() {
             if i == 0 {
                 board.player.health = health;
                 board.player.mana = mana;
+                board.player.base_x = base_x;
+                board.player.base_y = base_y;
             } else {
                 board.opponent.health = health;
                 board.opponent.mana = mana;
+                board.opponent.base_x = MAX_X - base_x;
+                board.opponent.base_y = MAX_Y - base_y;
             }
         }
 
@@ -214,7 +249,7 @@ fn main() {
                     x,
                     y,
                     shield_life,
-                    is_controlled: false,
+                    is_controlled: is_controlled == 1,
                 };
                 board.monster_list.push(monster);
             } else if entity_type == 1 {
@@ -223,7 +258,7 @@ fn main() {
                     x,
                     y,
                     shield_life,
-                    is_controlled: false,
+                    is_controlled: is_controlled == 1,
                 };
                 board.player.hero_list.push(hero);
             } else if entity_type == 2 {
@@ -232,7 +267,7 @@ fn main() {
                     x,
                     y,
                     shield_life,
-                    is_controlled: false,
+                    is_controlled: is_controlled == 1,
                 };
                 board.opponent.hero_list.push(hero);
             } else {
@@ -240,8 +275,11 @@ fn main() {
             }
         }
 
-        for i in 0..heroes_per_player as usize {
-            println!("WAIT");
+        let action_list = solver.solve(&board);
+        assert_eq!(action_list.len(), heroes_per_player);
+
+        for action in action_list.iter() {
+            action.print();
         }
     }
 }
