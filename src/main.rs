@@ -272,6 +272,7 @@ impl Solver {
                     };
                     is_already_target[nearest_monster] = true;
                 } else {
+                    // 特にやることがないなら、base に戻る
                     ret[hero_id] = Action::Move {
                         point: board.player.base,
                     };
