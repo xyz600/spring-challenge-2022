@@ -69,6 +69,24 @@ macro_rules! input_old {
     };
 }
 
+#[derive(Copy, Clone)]
+struct Point {
+    y: i32,
+    x: i32,
+}
+
+impl Point {
+    fn new() -> Point {
+        Point { y: 0, x: 0 }
+    }
+
+    fn distance2(&self, other: &Point) -> i32 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        dx * dx + dy * dy
+    }
+}
+
 struct Board {
     player: Player,
     opponent: Player,
@@ -78,8 +96,7 @@ struct Board {
 struct Player {
     health: i32,
     mana: i32,
-    base_x: i32,
-    base_y: i32,
+    base: Point,
     hero_list: Vec<Hero>,
 }
 
@@ -89,16 +106,14 @@ impl Player {
             health: 0,
             mana: 0,
             hero_list: vec![],
-            base_x: 0,
-            base_y: 0,
+            base: Point::new(),
         }
     }
 }
 
 struct Hero {
     id: i32,
-    x: i32,
-    y: i32,
+    pos: Point,
     shield_life: i32,    // not use
     is_controlled: bool, // not use
 }
@@ -148,26 +163,24 @@ impl MonsterThreatState {
 
 struct Monster {
     id: i32,
-    x: i32,
-    y: i32,
+    pos: Point,
     shield_life: i32,    // not use
     is_controlled: bool, // not use
     health: i32,
-    vx: i32,
-    vy: i32,
+    v: Point,
     threat_state: MonsterThreatState,
 }
 
 enum Action {
     Wait,
-    Move { x: i32, y: i32 },
+    Move { point: Point },
 }
 
 impl Action {
     fn print(&self) {
         match *self {
             Action::Wait => println!("WAIT"),
-            Action::Move { x, y } => println!("MOVE {} {}", x, y),
+            Action::Move { point } => println!("MOVE {} {}", point.x, point.y),
         }
     }
 }
@@ -176,7 +189,30 @@ struct Solver {}
 
 impl Solver {
     fn solve(&mut self, board: &Board) -> Vec<Action> {
-        vec![Action::Wait, Action::Wait, Action::Wait]
+        let mut threat_monster_list = vec![];
+        for (idx, monster) in board.monster_list.iter().enumerate() {
+            if monster.threat_state.threat_player() {
+                threat_monster_list.push(idx);
+            }
+        }
+        // 基地に近い順に sort
+        threat_monster_list.sort_by_key(|i| {
+            board.player.base.distance2(&board.monster_list[*i].pos);
+        });
+
+        let mut ret = vec![];
+        // target がいるならそこに向かう
+        for i in 0..3.min(threat_monster_list.len()) {
+            let target = &board.monster_list[threat_monster_list[i]];
+            ret.push(Action::Move { point: target.pos })
+        }
+        // 暇ならとりあえず基地に戻る
+        while ret.len() < 3 {
+            ret.push(Action::Move {
+                point: board.player.base,
+            });
+        }
+        ret
     }
 }
 
@@ -209,13 +245,14 @@ fn main() {
             if i == 0 {
                 board.player.health = health;
                 board.player.mana = mana;
-                board.player.base_x = base_x;
-                board.player.base_y = base_y;
+                board.player.base = Point { x: base_x, y: base_y };
             } else {
                 board.opponent.health = health;
                 board.opponent.mana = mana;
-                board.opponent.base_x = MAX_X - base_x;
-                board.opponent.base_y = MAX_Y - base_y;
+                board.opponent.base = Point {
+                    x: MAX_X - base_x,
+                    y: MAX_Y - base_y,
+                };
             }
         }
 
@@ -242,12 +279,10 @@ fn main() {
             if entity_type == 0 {
                 let monster = Monster {
                     health,
-                    vx,
-                    vy,
+                    v: Point { x: vx, y: vy },
                     threat_state: MonsterThreatState::to_threat_state(near_base, threat_for),
                     id,
-                    x,
-                    y,
+                    pos: Point { x, y },
                     shield_life,
                     is_controlled: is_controlled == 1,
                 };
@@ -255,8 +290,7 @@ fn main() {
             } else if entity_type == 1 {
                 let hero = Hero {
                     id,
-                    x,
-                    y,
+                    pos: Point { x, y },
                     shield_life,
                     is_controlled: is_controlled == 1,
                 };
@@ -264,8 +298,7 @@ fn main() {
             } else if entity_type == 2 {
                 let hero = Hero {
                     id,
-                    x,
-                    y,
+                    pos: Point { x, y },
                     shield_life,
                     is_controlled: is_controlled == 1,
                 };
