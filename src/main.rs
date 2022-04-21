@@ -69,61 +69,178 @@ macro_rules! input_old {
     };
 }
 
-use std::io;
-
-macro_rules! parse_input {
-    ($x:expr, $t:ident) => ($x.trim().parse::<$t>().unwrap())
+struct Board {
+    player: Player,
+    opponent: Player,
+    monster_list: Vec<Monster>,
 }
 
-/**
- * Auto-generated code below aims at helping you parse
- * the standard input according to the problem statement.
- **/
+struct Player {
+    health: i32,
+    mana: i32,
+    hero_list: Vec<Hero>,
+}
+
+impl Player {
+    fn new() -> Player {
+        Player {
+            health: 0,
+            mana: 0,
+            hero_list: vec![],
+        }
+    }
+}
+
+struct Hero {
+    id: i32,
+    x: i32,
+    y: i32,
+    shield_life: i32,    // not use
+    is_controlled: bool, // not use
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum MonsterThreatState {
+    NotThreat,                 // nearBase == 0 && threatFor == 0
+    PlayerThreatInTheFuture,   // nearBase == 0 && threatFor == 1
+    PlayerThreat,              // nearBase == 1 && threatFor == 1
+    OpponentThreatInTheFuture, // nearBase == 0 && threatFor == 2
+    OpponentThreat,            // nearBase == 1 && threatFor == 2
+}
+
+impl MonsterThreatState {
+    fn near_base(&self) -> bool {
+        *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::OpponentThreat
+    }
+
+    fn threat_player(&self) -> bool {
+        *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::PlayerThreatInTheFuture
+    }
+
+    fn threat_opponent(&self) -> bool {
+        *self == MonsterThreatState::OpponentThreat || *self == MonsterThreatState::OpponentThreatInTheFuture
+    }
+
+    fn to_threat_state(near_base: i32, threat_for: i32) -> MonsterThreatState {
+        if threat_for == 0 {
+            MonsterThreatState::NotThreat
+        } else if threat_for == 1 {
+            if near_base == 1 {
+                MonsterThreatState::PlayerThreat
+            } else {
+                MonsterThreatState::PlayerThreatInTheFuture
+            }
+        } else if threat_for == 2 {
+            if near_base == 1 {
+                MonsterThreatState::OpponentThreat
+            } else {
+                MonsterThreatState::OpponentThreatInTheFuture
+            }
+        } else {
+            panic!("unknown threat type");
+        }
+    }
+}
+
+struct Monster {
+    id: i32,
+    x: i32,
+    y: i32,
+    shield_life: i32,    // not use
+    is_controlled: bool, // not use
+    health: i32,
+    vx: i32,
+    vy: i32,
+    threat_state: MonsterThreatState,
+}
+
 fn main() {
-    let mut input_line = String::new();
-    io::stdin().read_line(&mut input_line).unwrap();
-    let inputs = input_line.split(" ").collect::<Vec<_>>();
-    let base_x = parse_input!(inputs[0], i32); // The corner of the map representing your base
-    let base_y = parse_input!(inputs[1], i32);
-    let mut input_line = String::new();
-    io::stdin().read_line(&mut input_line).unwrap();
-    let heroes_per_player = parse_input!(input_line, i32); // Always 3
+    input_old! {
+        line_num: 2,
+        base_x: i32,
+        base_y: i32,
+        heroes_per_player: i32,
+    }
 
     // game loop
     loop {
-        for i in 0..2 as usize {
-            let mut input_line = String::new();
-            io::stdin().read_line(&mut input_line).unwrap();
-            let inputs = input_line.split(" ").collect::<Vec<_>>();
-            let health = parse_input!(inputs[0], i32); // Your base health
-            let mana = parse_input!(inputs[1], i32); // Ignore in the first league; Spend ten mana to cast a spell
+        let mut board = Board {
+            player: Player::new(),
+            opponent: Player::new(),
+            monster_list: vec![],
+        };
+        for i in 0..2 {
+            input_old! {
+                line_num: 1,
+                health: i32,
+                mana: i32,
+            };
+            if i == 0 {
+                board.player.health = health;
+                board.player.mana = mana;
+            } else {
+                board.opponent.health = health;
+                board.opponent.mana = mana;
+            }
         }
-        let mut input_line = String::new();
-        io::stdin().read_line(&mut input_line).unwrap();
-        let entity_count = parse_input!(input_line, i32); // Amount of heros and monsters you can see
-        for i in 0..entity_count as usize {
-            let mut input_line = String::new();
-            io::stdin().read_line(&mut input_line).unwrap();
-            let inputs = input_line.split(" ").collect::<Vec<_>>();
-            let id = parse_input!(inputs[0], i32); // Unique identifier
-            let type = parse_input!(inputs[1], i32); // 0=monster, 1=your hero, 2=opponent hero
-            let x = parse_input!(inputs[2], i32); // Position of this entity
-            let y = parse_input!(inputs[3], i32);
-            let shield_life = parse_input!(inputs[4], i32); // Ignore for this league; Count down until shield spell fades
-            let is_controlled = parse_input!(inputs[5], i32); // Ignore for this league; Equals 1 when this entity is under a control spell
-            let health = parse_input!(inputs[6], i32); // Remaining health of this monster
-            let vx = parse_input!(inputs[7], i32); // Trajectory of this monster
-            let vy = parse_input!(inputs[8], i32);
-            let near_base = parse_input!(inputs[9], i32); // 0=monster with no target yet, 1=monster targeting a base
-            let threat_for = parse_input!(inputs[10], i32); // Given this monster's trajectory, is it a threat to 1=your base, 2=your opponent's base, 0=neither
+
+        input_old! {
+            line_num: 1,
+            entity_count: usize,
         }
+
+        for i in 0..entity_count {
+            input_old! {
+                line_num: 1,
+                id: i32,
+                entity_type: i32,
+                x: i32,
+                y: i32,
+                shield_life: i32,
+                is_controlled: i32,
+                health: i32,
+                vx: i32,
+                vy: i32,
+                near_base: i32,
+                threat_for: i32,
+            };
+            if entity_type == 0 {
+                let monster = Monster {
+                    health,
+                    vx,
+                    vy,
+                    threat_state: MonsterThreatState::to_threat_state(near_base, threat_for),
+                    id,
+                    x,
+                    y,
+                    shield_life,
+                    is_controlled: false,
+                };
+                board.monster_list.push(monster);
+            } else if entity_type == 1 {
+                let hero = Hero {
+                    id,
+                    x,
+                    y,
+                    shield_life,
+                    is_controlled: false,
+                };
+                board.player.hero_list.push(hero);
+            } else if entity_type == 2 {
+                let hero = Hero {
+                    id,
+                    x,
+                    y,
+                    shield_life,
+                    is_controlled: false,
+                };
+                board.opponent.hero_list.push(hero);
+            } else {
+                panic!("unknown entity type");
+            }
+        }
+
         for i in 0..heroes_per_player as usize {
-
-            // Write an action using println!("message...");
-            // To debug: eprintln!("Debug message...");
-
-
-            // In the first league: MOVE <x> <y> | WAIT; In later leagues: | SPELL <spellParams>;
             println!("WAIT");
         }
     }
