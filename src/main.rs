@@ -85,6 +85,18 @@ impl Point {
         let dy = self.y - other.y;
         dx * dx + dy * dy
     }
+
+    fn distance(&self, other: &Point) -> i32 {
+        (self.distance2(other) as f64).sqrt().ceil() as i32
+    }
+
+    fn norm2(&self) -> i32 {
+        self.x * self.x + self.y * self.y
+    }
+
+    fn norm(&self) -> i32 {
+        (self.norm2() as f64).sqrt().ceil() as i32
+    }
 }
 
 impl std::ops::Add<Self> for Point {
@@ -98,10 +110,44 @@ impl std::ops::Add<Self> for Point {
     }
 }
 
+impl std::ops::Sub<Self> for Point {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Point {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
+impl std::ops::Div<i32> for Point {
+    type Output = Self;
+
+    fn div(self, rhs: i32) -> Self::Output {
+        Point {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        }
+    }
+}
+
+impl std::ops::Mul<i32> for Point {
+    type Output = Self;
+
+    fn mul(self, rhs: i32) -> Self::Output {
+        Point {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
 struct Board {
     player: Player,
     opponent: Player,
     monster_list: Vec<Monster>,
+    spawn_list: Vec<Point>,
 }
 
 struct Player {
@@ -192,6 +238,7 @@ impl Monster {
 enum Action {
     Wait,
     Move { point: Point },
+    Wind { point: Point },
 }
 
 impl Action {
@@ -199,19 +246,28 @@ impl Action {
         match *self {
             Action::Wait => println!("WAIT"),
             Action::Move { point } => println!("MOVE {} {}", point.x, point.y),
+            Action::Wind { point } => println!("SPELL WIND {} {}", point.x, point.y),
         }
     }
+}
+
+#[derive(PartialEq)]
+enum WindHeroState {
+    Move,
+    Wind,
 }
 
 struct Solver {
     // このターンで向かうべき位置があれば覚えておく
     target: Vec<Option<Point>>,
+    wind_hero_state: WindHeroState,
 }
 
 impl Solver {
     fn new(hero_size: usize) -> Solver {
         Solver {
             target: vec![None; hero_size],
+            wind_hero_state: WindHeroState::Move,
         }
     }
 
@@ -222,10 +278,53 @@ impl Solver {
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let mut ret = vec![Action::Wait; self.hero_size()];
 
+        // hero_id := 0 が 相手の spawn 地点へwind をし続ける
+        if self.wind_hero_state == WindHeroState::Move {
+            // 状態変化
+            if let Some(target) = self.target[0] {
+                if target == board.player.hero_list[0].pos {
+                    self.wind_hero_state = WindHeroState::Wind;
+                }
+            }
+        }
+        match self.wind_hero_state {
+            WindHeroState::Move => {
+                // 相手の base に最も近い spawn area に移動
+                if let None = self.target[0] {
+                    let target = board
+                        .spawn_list
+                        .iter()
+                        .min_by_key(|&p| p.distance2(&board.opponent.base))
+                        .unwrap();
+                    self.target[0] = Some(*target);
+                }
+                ret[0] = Action::Move {
+                    point: self.target[0].unwrap(),
+                };
+            }
+            WindHeroState::Wind => {
+                // マナが余ってて、周囲に敵キャラが存在していそうなら wind
+                if board.player.mana >= 10
+                    && board
+                        .monster_list
+                        .iter()
+                        .filter(|m| m.pos.distance2(&board.player.hero_list[0].pos) < WIND_RADIUS * WIND_RADIUS)
+                        .count()
+                        > 0
+                {
+                    ret[0] = Action::Wind {
+                        point: board.opponent.base,
+                    };
+                }
+            }
+        }
+
+        // hero_id := 1 以降は、これまでと同じ
+
         let mut is_already_target = vec![false; board.monster_list.len()];
 
         // 既にtarget があるなら、見つけて登録
-        for hero_id in 0..self.hero_size() {
+        for hero_id in 1..self.hero_size() {
             if let Some(target) = self.target[hero_id] {
                 let mut find = false;
                 for (monster_index, monster) in board.monster_list.iter().enumerate() {
@@ -247,7 +346,7 @@ impl Solver {
         }
 
         // 先頭から順に、近くの危険生物を見つけて、排除
-        for hero_id in 0..self.hero_size() {
+        for hero_id in 1..self.hero_size() {
             if let None = self.target[hero_id] {
                 let hero = &board.player.hero_list[hero_id];
 
@@ -272,9 +371,11 @@ impl Solver {
                     };
                     is_already_target[nearest_monster] = true;
                 } else {
-                    // 特にやることがないなら、base に戻る
+                    // 特にやることがないなら、base よりちょっと離れた場所に戻る(base にいると、出陣が遅くなるので)
+                    let dir = board.opponent.base - board.player.base;
+                    let dir = dir * 3000 / dir.norm();
                     ret[hero_id] = Action::Move {
-                        point: board.player.base,
+                        point: board.player.base + dir,
                     };
                 }
             }
@@ -286,6 +387,7 @@ impl Solver {
 
 const MAX_X: i32 = 17630;
 const MAX_Y: i32 = 9000;
+const WIND_RADIUS: i32 = 1280;
 
 fn main() {
     input_old! {
@@ -303,6 +405,24 @@ fn main() {
             player: Player::new(),
             opponent: Player::new(),
             monster_list: vec![],
+            spawn_list: vec![
+                Point {
+                    x: MAX_X / 2,
+                    y: WIND_RADIUS,
+                },
+                Point {
+                    x: MAX_X / 2 + 4000,
+                    y: WIND_RADIUS,
+                },
+                Point {
+                    x: MAX_X / 2,
+                    y: MAX_Y - WIND_RADIUS,
+                },
+                Point {
+                    x: MAX_X / 2 - 4000,
+                    y: MAX_Y - WIND_RADIUS,
+                },
+            ],
         };
         for i in 0..2 {
             input_old! {
