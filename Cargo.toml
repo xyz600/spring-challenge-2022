@@ -3,4 +3,5 @@
 members = [
     "bot-submit",
     "battle-env",
+    "lib",
 ]
