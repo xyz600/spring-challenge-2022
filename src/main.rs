@@ -396,13 +396,13 @@ impl Solver {
                             self.hero_state[hero_id] = if hero_id == 0 {
                                 HeroState::Defender { target_monster: None }
                             } else if hero_id == 1 {
-                                let point = board.opponent.base + Point { x: -6000, y: -1000 };
+                                let point = board.opponent.base + Point { x: -8000, y: -3000 };
                                 HeroState::Attacker {
                                     internal_state: AttackerState::InitialMove(point),
                                     target_monster: None,
                                 }
                             } else {
-                                let point = board.opponent.base + Point { x: -1000, y: -6000 };
+                                let point = board.opponent.base + Point { x: -3000, y: -8000 };
                                 HeroState::Attacker {
                                     internal_state: AttackerState::InitialMove(point),
                                     target_monster: None,
@@ -475,9 +475,9 @@ impl Solver {
                                 }
                             } else {
                                 let point = if hero_id == 1 {
-                                    board.opponent.base + Point { x: -6000, y: -1000 }
+                                    board.opponent.base + Point { x: -8000, y: -3000 }
                                 } else {
-                                    board.opponent.base + Point { x: -1000, y: -6000 }
+                                    board.opponent.base + Point { x: -3000, y: -8000 }
                                 };
                                 Action::Move {
                                     point,
@@ -500,34 +500,44 @@ impl Solver {
                 HeroState::Defender { target_monster } => {
                     // 脅威になるものを優先に、近くの敵を優先してマナを貯める
                     // FIXME: できるだけたくさんの敵を殴れるポイントに向かう
-                    let mut candidates = board.monster_list.iter().collect::<Vec<_>>();
-                    assert!(!candidates.is_empty());
-                    candidates.sort_by(|m1, m2| {
-                        if m1.threat_state.threat_level() != m2.threat_state.threat_level() {
-                            m2.threat_state.threat_level().cmp(&m1.threat_state.threat_level())
-                        } else {
-                            let d1 = m1.pos.distance2(&board.player.base);
-                            let d2 = m2.pos.distance2(&board.player.base);
-                            d1.cmp(&d2)
-                        }
-                    });
-                    *target_monster = Some(candidates[0].id);
-
-                    let monster = board.monster(target_monster.unwrap()).unwrap();
-                    // あと1手で自陣がダメージを喰らうなら、wind
-                    if monster.health > PLAYER_DAMAGE
-                        && board.player.base.distance(&monster.next_pos()) < THREASHOLD_BASE_DAMAGE_RADIUS
-                    {
-                        let point = hero.pos * 2 - board.player.base;
-                        Action::Wind {
-                            point,
-                            message: format!("defender: immediate avoidance ({} {})", point.x, point.y),
+                    let mut candidates = board
+                        .monster_list
+                        .iter()
+                        .filter(|m| m.pos.distance(&board.player.base) < 8000)
+                        .collect::<Vec<_>>();
+                    if candidates.is_empty() {
+                        Action::Move {
+                            point: Point { x: 3000, y: 3000 },
+                            message: format!("defend cannot find opponent: "),
                         }
                     } else {
-                        let point = monster.next_pos();
-                        Action::Move {
-                            point,
-                            message: format!("defender: track target ({} {})", point.x, point.y),
+                        candidates.sort_by(|m1, m2| {
+                            if m1.threat_state.threat_level() != m2.threat_state.threat_level() {
+                                m2.threat_state.threat_level().cmp(&m1.threat_state.threat_level())
+                            } else {
+                                let d1 = m1.pos.distance2(&board.player.base);
+                                let d2 = m2.pos.distance2(&board.player.base);
+                                d1.cmp(&d2)
+                            }
+                        });
+                        *target_monster = Some(candidates[0].id);
+
+                        let monster = board.monster(target_monster.unwrap()).unwrap();
+                        // あと1手で自陣がダメージを喰らうなら、wind
+                        if monster.health > PLAYER_DAMAGE
+                            && board.player.base.distance(&monster.next_pos()) < THREASHOLD_BASE_DAMAGE_RADIUS
+                        {
+                            let point = hero.pos * 2 - board.player.base;
+                            Action::Wind {
+                                point,
+                                message: format!("defender: immediate avoidance ({} {})", point.x, point.y),
+                            }
+                        } else {
+                            let point = monster.next_pos();
+                            Action::Move {
+                                point,
+                                message: format!("defender: track target ({} {})", point.x, point.y),
+                            }
                         }
                     }
                 }
