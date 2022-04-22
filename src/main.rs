@@ -430,7 +430,8 @@ impl Solver {
                             .monster_list
                             .iter()
                             .filter(|m| {
-                                !m.threat_state.threat_opponent() && board.opponent.base.distance(&m.pos) <= 8000
+                                let dist = board.opponent.base.distance(&m.pos);
+                                !m.threat_state.threat_opponent() && DETECT_BASE_RADIUS < dist && MAX_X / 2 <= m.pos.x
                             })
                             .collect::<Vec<_>>();
 
@@ -443,9 +444,7 @@ impl Solver {
                     };
 
                     // target が決まってなかったら、選定
-                    if target_undecided {
-                        select_target();
-                    }
+                    select_target();
 
                     match internal_state {
                         AttackerState::InitialMove(point) => {
