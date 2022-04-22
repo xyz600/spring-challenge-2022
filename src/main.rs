@@ -1,5 +1,7 @@
 // https://qiita.com/tanakh/items/0ba42c7ca36cd29d0ac8
 
+use std::time::Instant;
+
 macro_rules! input {
     (source = $s:expr, $($r:tt)*) => {
         let mut iter = $s.split_whitespace();
@@ -163,12 +165,6 @@ impl Board {
         }
         None
     }
-
-    fn print(&self) {
-        for m in self.monster_list.iter() {
-            eprintln!("monster id: {}, pos: ({} {})", m.id, m.pos.x, m.pos.y);
-        }
-    }
 }
 
 struct Player {
@@ -281,9 +277,7 @@ enum HeroState {
         internal_state: AttackerState,
         target_monster: Option<i32>,
     },
-    Defender {
-        target_monster: Option<i32>,
-    },
+    Defender,
 }
 
 impl HeroState {
@@ -294,7 +288,7 @@ impl HeroState {
                 internal_state,
                 target_monster,
             } => target_monster,
-            HeroState::Defender { target_monster } => target_monster,
+            HeroState::Defender => None,
         }
     }
 }
@@ -349,12 +343,11 @@ impl Solver {
         let radius = (DETECT_BASE_RADIUS + 2000) as f64;
         let dx = (rad.cos() * radius) as i32;
         let dy = (rad.sin() * radius) as i32;
-        eprintln!("home: {} {}", dx, dy);
         *base_pos + Point { x: dx, y: dy }
     }
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
-        board.print();
+        let start = Instant::now();
 
         let mut ret = vec![
             Action::Wait {
@@ -393,7 +386,7 @@ impl Solver {
                         const COLLECT_MANA_FINISH_TURN: usize = 80;
                         if board.turn >= COLLECT_MANA_FINISH_TURN {
                             self.hero_state[hero_id] = if hero_id == 0 {
-                                HeroState::Defender { target_monster: None }
+                                HeroState::Defender
                             } else if hero_id == 1 {
                                 let point = board.opponent.base + Point { x: -8000, y: -3000 };
                                 HeroState::Attacker {
@@ -409,7 +402,7 @@ impl Solver {
                             };
                         }
                         Action::Move {
-                            point: board.monster(monster_id).unwrap().next_pos(),
+                            point: board.monster(monster_id).unwrap().pos,
                             message: format!("collect mana: target {}", monster_id),
                         }
                     } else {
@@ -437,7 +430,7 @@ impl Solver {
                         *target_monster = if candidates.is_empty() {
                             None
                         } else {
-                            candidates.sort_by_key(|m| m.next_pos().distance2(&hero.pos));
+                            candidates.sort_by_key(|m| m.pos.distance2(&hero.pos));
                             Some(candidates[0].id)
                         }
                     };
@@ -461,12 +454,12 @@ impl Solver {
                         }
                         AttackerState::Target => {
                             if let Some(monster_id) = target_monster {
-                                let monster = board.monster(target_monster.unwrap()).unwrap();
+                                let monster = board.monster(*monster_id).unwrap();
                                 // wind 圏内なら Wind に遷移
-                                if hero.pos.distance(&monster.next_pos()) < WIND_RADIUS - VELOCITY_DIFF {
+                                if hero.pos.distance(&monster.pos) <= WIND_RADIUS - VELOCITY_DIFF {
                                     *internal_state = AttackerState::Wind;
                                 }
-                                let point = monster.next_pos();
+                                let point = monster.pos;
                                 Action::Move {
                                     point,
                                     message: format!("attack: target to go ({}, {})", point.x, point.y),
@@ -495,7 +488,7 @@ impl Solver {
                         }
                     }
                 }
-                HeroState::Defender { target_monster } => {
+                HeroState::Defender => {
                     // 脅威になるものを優先に、近くの敵を優先してマナを貯める
                     // FIXME: できるだけたくさんの敵を殴れるポイントに向かう
                     let mut candidates = board
@@ -503,27 +496,22 @@ impl Solver {
                         .iter()
                         .filter(|m| m.pos.distance(&board.player.base) < 8000)
                         .collect::<Vec<_>>();
+
                     if candidates.is_empty() {
                         Action::Move {
                             point: Point { x: 3000, y: 3000 },
                             message: format!("defend cannot find opponent: "),
                         }
                     } else {
-                        candidates.sort_by(|m1, m2| {
-                            if m1.threat_state.threat_level() != m2.threat_state.threat_level() {
-                                m2.threat_state.threat_level().cmp(&m1.threat_state.threat_level())
-                            } else {
-                                let d1 = m1.pos.distance2(&board.player.base);
-                                let d2 = m2.pos.distance2(&board.player.base);
-                                d1.cmp(&d2)
-                            }
-                        });
-                        *target_monster = Some(candidates[0].id);
-
-                        let monster = board.monster(target_monster.unwrap()).unwrap();
-                        // あと1手で自陣がダメージを喰らうなら、wind
-                        if monster.health > PLAYER_DAMAGE
-                            && board.player.base.distance(&monster.next_pos()) < THREASHOLD_BASE_DAMAGE_RADIUS
+                        // 1体でも HP を減らせる状況のキャラがいるなら、 wind したい
+                        if candidates
+                            .iter()
+                            .filter(|monster| {
+                                monster.health > 2
+                                    && board.player.base.distance(&monster.next_pos()) <= THREASHOLD_BASE_DAMAGE_RADIUS
+                            })
+                            .count()
+                            > 0
                         {
                             let point = hero.pos * 2 - board.player.base;
                             Action::Wind {
@@ -531,7 +519,21 @@ impl Solver {
                                 message: format!("defender: immediate avoidance ({} {})", point.x, point.y),
                             }
                         } else {
-                            let point = monster.next_pos();
+                            // いないなら、一番危険な monster をマーク
+                            candidates.sort_by(|m1, m2| {
+                                let l1 = m1.threat_state.threat_level();
+                                let l2 = m2.threat_state.threat_level();
+                                if l1 != l2 {
+                                    l2.cmp(&l1)
+                                } else {
+                                    let d1 = m1.pos.distance2(&board.player.base);
+                                    let d2 = m2.pos.distance2(&board.player.base);
+                                    d1.cmp(&d2)
+                                }
+                            });
+
+                            let monster = candidates[0];
+                            let point = monster.pos;
                             Action::Move {
                                 point,
                                 message: format!("defender: track target ({} {})", point.x, point.y),
@@ -541,6 +543,9 @@ impl Solver {
                 }
             }
         }
+
+        let elapsed = (Instant::now() - start).as_millis();
+        eprintln!("elapsed: {}[ms]", elapsed);
 
         ret
     }
