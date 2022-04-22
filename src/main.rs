@@ -151,7 +151,6 @@ struct Board {
     player: Player,
     opponent: Player,
     monster_list: Vec<Monster>,
-    spawn_list: Vec<Point>,
     turn: usize,
 }
 
@@ -592,24 +591,6 @@ fn main() {
             player: Player::new(),
             opponent: Player::new(),
             monster_list: vec![],
-            spawn_list: vec![
-                Point {
-                    x: MAX_X / 2,
-                    y: WIND_RADIUS,
-                },
-                Point {
-                    x: MAX_X / 2 + 4000,
-                    y: WIND_RADIUS,
-                },
-                Point {
-                    x: MAX_X / 2,
-                    y: MAX_Y - WIND_RADIUS,
-                },
-                Point {
-                    x: MAX_X / 2 - 4000,
-                    y: MAX_Y - WIND_RADIUS,
-                },
-            ],
             turn,
         };
         for i in 0..2 {
