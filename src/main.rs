@@ -594,7 +594,10 @@ impl Solver {
                                 }
                             }
                         } else {
-                            let point = info.home.clone();
+                            // hero_id = 0
+                            // マナを集める
+
+                            let point = info.home;
                             let candidate = self.enumerate_multiple_hit(board, hero_id);
 
                             // 候補がなければ自分の home に向かう
