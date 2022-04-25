@@ -326,8 +326,8 @@ impl AttackerInfo {
     fn new() -> AttackerInfo {
         AttackerInfo {
             home: Point {
-                x: MAX_X - 3000,
-                y: MAX_Y - 3000,
+                x: MAX_X - 2000,
+                y: MAX_Y - 2000,
             },
         }
     }
@@ -343,8 +343,8 @@ impl MidFielderInfo {
     fn new() -> MidFielderInfo {
         MidFielderInfo {
             home: Point {
-                y: MAX_Y - 6000,
-                x: MAX_X - 6000,
+                y: MAX_Y - 4242,
+                x: MAX_X - 4242,
             },
             assisted: HashSet::new(),
         }
@@ -633,7 +633,7 @@ impl Solver {
                     }
                     HeroState::Attacker(info) => {
                         let hero = &board.player.hero_list[hero_id];
-                        if info.home.distance(&hero.pos) > 3000 {
+                        if info.home.distance(&hero.pos) > 2000 {
                             Action::Move {
                                 point: info.home,
                                 message: format!("[at]home"),
@@ -769,8 +769,8 @@ impl Solver {
 
         // 一定条件で、状態遷移を行う
         if board.turn == 120 {
-            self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
-            self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
+            self.hero_state[0] = HeroState::MidFielder(MidFielderInfo::new());
+            self.hero_state[1] = HeroState::Attacker(AttackerInfo::new());
             self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
         }
 
