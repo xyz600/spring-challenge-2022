@@ -1,6 +1,6 @@
 // https://qiita.com/tanakh/items/0ba42c7ca36cd29d0ac8
 
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 
 macro_rules! input {
     (source = $s:expr, $($r:tt)*) => {
@@ -303,7 +303,7 @@ impl CollectManaInfo {
             }
         } else {
             let rad = std::f64::consts::PI / 6.0 * (hero_id as f64);
-            let radius = (DETECT_BASE_RADIUS + 1000) as f64;
+            let radius = DETECT_BASE_RADIUS as f64;
             let dx = (rad.cos() * radius) as i32;
             let dy = (rad.sin() * radius) as i32;
             *base_pos + Point { x: dx, y: dy }
@@ -333,18 +333,20 @@ impl AttackerInfo {
     }
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Clone)]
 struct MidFielderInfo {
     home: Point,
+    assisted: HashSet<i32>,
 }
 
 impl MidFielderInfo {
     fn new() -> MidFielderInfo {
         MidFielderInfo {
             home: Point {
-                y: MAX_Y - 5000,
-                x: MAX_X - 5000,
+                y: MAX_Y - 6000,
+                x: MAX_X - 6000,
             },
+            assisted: HashSet::new(),
         }
     }
 }
@@ -362,7 +364,7 @@ impl DefenderInfo {
     }
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Clone)]
 enum HeroState {
     CollectMana(CollectManaInfo),
     Attacker(AttackerInfo),
@@ -385,12 +387,15 @@ const MAX_X: i32 = 17630;
 const MAX_Y: i32 = 9000;
 const DETECT_BASE_RADIUS: i32 = 5000;
 const WIND_RADIUS: i32 = 1280;
+const CONTROL_RADIUS: i32 = 2200;
+const SHIELD_RADIUS: i32 = 2200;
 const MAX_PLAYER_VELOCITY: i32 = 800;
 const MAX_MONSTER_VELOCITY: i32 = 400;
 const THREASHOLD_BASE_DAMAGE_RADIUS: i32 = 300;
 const PLAYER_DAMAGE: i32 = 2;
 const VELOCITY_DIFF: i32 = MAX_PLAYER_VELOCITY - MAX_MONSTER_VELOCITY;
 const ATTACK_HIT_RADIUS: i32 = 800;
+const HERO_RECOGNIZABLE_RADIUS: i32 = 2200;
 
 impl Solver {
     fn new(base_pos: &Point, hero_size: usize) -> Solver {
@@ -496,187 +501,12 @@ impl Solver {
 
     /// m を最短経路で追いかけようと思った時に必要なターン数と目指す場所
     fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
-        (0..)
-            .map(|turn| (turn, m.pos + m.v * turn))
-            .filter(|(turn, target)| target.distance(pos) <= ATTACK_HIT_RADIUS + MAX_PLAYER_VELOCITY * turn)
-            .next()
-            .unwrap()
-    }
-
-    fn radius_range(&self, hero_id: usize) -> (f64, f64) {
-        (
-            std::f64::consts::PI / 4.0 * ((hero_id - 1) as f64),
-            std::f64::consts::PI / 4.0 * (hero_id as f64),
-        )
-    }
-
-    fn angle_from(&self, p: &Point, b: &Point) -> f64 {
-        let dir = *p - *b;
-        let cos = dir.x as f64 / dir.norm() as f64;
-
-        cos.acos()
-    }
-
-    fn collect_mana(&self, board: &Board, hero_id: usize, info: &CollectManaInfo) -> Action {
-        let hero = &board.player.hero_list[hero_id];
-
-        if 1 <= hero_id {
-            // 相手 hero, monster, 自分 hero 全員 WIND 圏内にいる場合は、wind!
-            for op_hero in board.opponent.hero_list.iter() {
-                for monster in board.monster_list.iter() {
-                    if hero.pos.distance(&op_hero.pos) <= WIND_RADIUS
-                        && hero.pos.distance(&monster.pos) <= WIND_RADIUS
-                        && op_hero.pos.distance(&monster.pos) <= WIND_RADIUS
-                    {
-                        // FIXME: 相手が1手で WIND を使える条件をもっと正確に書く
-                        let point = hero.pos * 2 - board.player.base;
-                        return Action::Wind {
-                            point,
-                            message: format!("[m1]im wind"),
-                        };
-                    }
-                }
-            }
-
-            // 左右2分割して、base に一番近いやつを殴り続ける
-            let candidate = board
-                .monster_list
-                .iter()
-                .filter(|m| {
-                    let (f, t) = self.radius_range(hero_id);
-                    let angle = self.angle_from(&m.pos, &board.player.base);
-                    f <= angle && angle < t || m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS
-                })
-                .min_by_key(|m| m.pos.distance(&board.player.base));
-
-            if let Some(monster) = candidate {
-                eprintln!("hero {} target {:?} id = {}", hero_id, monster.pos, monster.id);
-                // 既に monster に追いついていて、goal されそうなら、 WIND!
-                if monster.pos.distance(&board.player.base) <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
-                    && monster.pos.distance(&hero.pos) <= WIND_RADIUS
-                {
-                    let point = hero.pos * 2 - board.player.base;
-                    Action::Wind {
-                        point,
-                        message: format!("[m1]wind"),
-                    }
-                } else {
-                    if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
-                        // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
-                        let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
-                        assert!(!candidate.is_empty());
-                        eprintln!("{:?}", candidate);
-
-                        Action::Move {
-                            point: candidate[0].1,
-                            message: format!("[m1]{}attack", candidate[0].0),
-                        }
-                    } else {
-                        let (turn, point) = self.shortest_move(&monster, &hero.pos);
-                        eprintln!("shortest: {:?} -> {:?}: {}", hero.pos, monster.pos, turn);
-                        Action::Move {
-                            point,
-                            message: format!("[m1]shortest"),
-                        }
-                    }
-                }
-            } else {
-                Action::Move {
-                    point: info.home,
-                    message: format!("[m1]go home"),
-                }
-            }
-        } else {
-            let candidate = self.enumerate_multiple_hit(board, hero_id);
-
-            // 候補がなければ自分の home に向かう
-            if candidate.is_empty() {
-                Action::Move {
-                    point: info.home,
-                    message: format!("[m2]go home"),
-                }
-            } else {
-                // FIXME: 探索して、数手分で最もマナが稼げる所に移る
-
-                // 即時効果が発揮できる場所なら、効果が高い順に移動する
-                for (hit, pos) in candidate.iter() {
-                    if hero.pos.distance(&pos) <= MAX_PLAYER_VELOCITY {
-                        return Action::Move {
-                            point: *pos,
-                            message: format!("[m2]attack {}", hit),
-                        };
-                    }
-                }
-
-                // hit がたくさんある、一番近いところにとりあえず移っておく
-                let target = candidate
-                    .iter()
-                    .filter(|p| p.0 == candidate[0].0)
-                    .map(|(_, p)| p)
-                    .min_by_key(|p| p.distance2(&hero.pos))
-                    .unwrap();
-
-                Action::Move {
-                    point: *target,
-                    message: format!("[m2]move only"),
-                }
-            }
-        }
-    }
-
-    fn attack(&self, board: &Board, hero_id: usize, info: &AttackerInfo) -> Action {
-        Action::Move {
-            point: info.home,
-            message: format!("[at]home"),
-        }
-    }
-
-    fn assist(&self, board: &Board, hero_id: usize, info: &MidFielderInfo) -> Action {
-        Action::Move {
-            point: info.home,
-            message: format!("[as]home"),
-        }
-    }
-
-    fn defend(&self, board: &Board, hero_id: usize, info: &DefenderInfo) -> Action {
-        let hero = &board.player.hero_list[hero_id];
-
-        // base に一番近いやつを殴り続ける
-        let candidate = board
-            .monster_list
-            .iter()
-            .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
-            .min_by_key(|m| m.pos.distance(&board.player.base));
-
-        if let Some(monster) = candidate {
-            // FIXME: 他の手段でも防衛をする
-            // 既に monster に追いついていて、goal されそう、かつ影響範囲内に SHIELD が効果あるキャラがいるなら、WIND!
-            if monster.pos.distance(&hero.pos) <= WIND_RADIUS
-                && board
-                    .monster_list
-                    .iter()
-                    .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.shield_life == 0)
-                    .count()
-                    > 0
-            {
-                let point = hero.pos * 2 - board.player.base;
-                Action::Wind {
-                    point,
-                    message: format!("[def]wind"),
-                }
-            } else {
-                let (_, point) = self.shortest_move(&monster, &hero.pos);
-                Action::Move {
-                    point,
-                    message: format!("[def]attack"),
-                }
-            }
-        } else {
-            Action::Move {
-                point: info.home,
-                message: format!("[def]go home"),
-            }
-        }
+        (1, m.next_pos())
+        // (0..)
+        //     .map(|turn| (turn, m.pos + m.v * turn))
+        //     .filter(|(turn, target)| target.distance(pos) <= ATTACK_HIT_RADIUS + MAX_PLAYER_VELOCITY * turn)
+        //     .next()
+        //     .unwrap()
     }
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
@@ -684,17 +514,261 @@ impl Solver {
 
         let ret = (0..self.hero_size())
             .map(|hero_id| -> Action {
-                match &self.hero_state[hero_id] {
-                    HeroState::CollectMana(info) => self.collect_mana(board, hero_id, info),
-                    HeroState::Attacker(info) => self.attack(board, hero_id, info),
-                    HeroState::MidFielder(info) => self.assist(board, hero_id, info),
-                    HeroState::Defender(info) => self.defend(board, hero_id, info),
+                let state = &mut self.hero_state[hero_id];
+                match state {
+                    HeroState::CollectMana(info) => {
+                        let hero = &board.player.hero_list[hero_id];
+                        if 1 <= hero_id {
+                            // 相手 hero, monster, 自分 hero 全員 WIND 圏内にいる場合は、wind!
+                            for op_hero in board.opponent.hero_list.iter() {
+                                for monster in board.monster_list.iter() {
+                                    if hero.pos.distance(&op_hero.pos) <= WIND_RADIUS
+                                        && hero.pos.distance(&monster.pos) <= WIND_RADIUS
+                                        && op_hero.pos.distance(&monster.pos) <= WIND_RADIUS
+                                    {
+                                        // FIXME: 相手が1手で WIND を使える条件をもっと正確に書く
+                                        let point = hero.pos * 2 - board.player.base;
+                                        return Action::Wind {
+                                            point,
+                                            message: format!("[m1]im wind"),
+                                        };
+                                    }
+                                }
+                            }
+
+                            // 左右2分割して、base に一番近いやつを殴り続ける
+                            let candidate = board
+                                .monster_list
+                                .iter()
+                                .filter(|m| {
+                                    let (f, t) = (
+                                        std::f64::consts::PI / 4.0 * ((hero_id - 1) as f64),
+                                        std::f64::consts::PI / 4.0 * (hero_id as f64),
+                                    );
+                                    let angle = {
+                                        let dir = m.pos - board.player.base;
+                                        let cos = dir.x as f64 / dir.norm() as f64;
+                                        cos.acos()
+                                    };
+                                    f <= angle && angle < t || m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS
+                                })
+                                .min_by_key(|m| m.pos.distance(&board.player.base));
+
+                            if let Some(monster) = candidate {
+                                eprintln!("hero {} target {:?} id = {}", hero_id, monster.pos, monster.id);
+                                // 既に monster に追いついていて、goal されそうなら、 WIND!
+                                if monster.pos.distance(&board.player.base)
+                                    <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
+                                    && monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                                {
+                                    let point = hero.pos * 2 - board.player.base;
+                                    Action::Wind {
+                                        point,
+                                        message: format!("[m1]wind"),
+                                    }
+                                } else {
+                                    if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
+                                        // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
+                                        let candidate =
+                                            self.enumerate_multiple_hit_with_target(board, hero_id, monster);
+                                        assert!(!candidate.is_empty());
+                                        eprintln!("{:?}", candidate);
+
+                                        Action::Move {
+                                            point: candidate[0].1,
+                                            message: format!("[m1]{}attack", candidate[0].0),
+                                        }
+                                    } else {
+                                        let (turn, point) = self.shortest_move(&monster, &hero.pos);
+                                        eprintln!("shortest: {:?} -> {:?}: {}", hero.pos, monster.pos, turn);
+                                        Action::Move {
+                                            point,
+                                            message: format!("[m1]shortest"),
+                                        }
+                                    }
+                                }
+                            } else {
+                                Action::Move {
+                                    point: info.home,
+                                    message: format!("[m1]go home"),
+                                }
+                            }
+                        } else {
+                            let point = info.home.clone();
+                            let candidate = self.enumerate_multiple_hit(board, hero_id);
+
+                            // 候補がなければ自分の home に向かう
+                            if candidate.is_empty() {
+                                Action::Move {
+                                    point,
+                                    message: format!("[m2]go home"),
+                                }
+                            } else {
+                                // FIXME: 探索して、数手分で最もマナが稼げる所に移る
+
+                                // 即時効果が発揮できる場所なら、効果が高い順に移動する
+                                for (hit, pos) in candidate.iter() {
+                                    if hero.pos.distance(&pos) <= MAX_PLAYER_VELOCITY {
+                                        return Action::Move {
+                                            point: *pos,
+                                            message: format!("[m2]{}attack", hit),
+                                        };
+                                    }
+                                }
+
+                                // hit がたくさんある、一番近いところにとりあえず移っておく
+                                let target = candidate
+                                    .iter()
+                                    .filter(|p| p.0 == candidate[0].0)
+                                    .map(|(_, p)| p)
+                                    .min_by_key(|p| p.distance2(&hero.pos))
+                                    .unwrap();
+
+                                Action::Move {
+                                    point: *target,
+                                    message: format!("[m2]move only"),
+                                }
+                            }
+                        }
+                    }
+                    HeroState::Attacker(info) => {
+                        let hero = &board.player.hero_list[hero_id];
+                        if info.home.distance(&hero.pos) > 3000 {
+                            Action::Move {
+                                point: info.home,
+                                message: format!("[at]home"),
+                            }
+                        } else if let Some(monster) = board
+                            .monster_list
+                            .iter()
+                            .filter(|m| {
+                                m.shield_life == 0
+                                    && m.threat_state.threat_opponent()
+                                    && m.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS
+                            })
+                            .min_by_key(|m| hero.pos.distance(&m.pos))
+                        {
+                            if hero.pos.distance(&monster.pos) <= SHIELD_RADIUS {
+                                Action::Shield {
+                                    entity_id: monster.id,
+                                    message: format!("[at]shield"),
+                                }
+                            } else {
+                                let (_, point) = self.shortest_move(&monster, &hero.pos);
+                                Action::Move {
+                                    point,
+                                    message: format!("[at]shortest"),
+                                }
+                            }
+                        } else {
+                            Action::Move {
+                                point: info.home,
+                                message: format!("[at]home"),
+                            }
+                        }
+                    }
+                    HeroState::MidFielder(info) => {
+                        let hero = &board.player.hero_list[hero_id];
+
+                        // 一番近い monster を見つける
+                        if info.home.distance(&hero.pos) > 2000 {
+                            // 前線に十分近くなければ、前線へ移動を優先
+                            Action::Move {
+                                point: info.home,
+                                message: format!("[as]home"),
+                            }
+                        } else if let Some(target) = board
+                            .monster_list
+                            .iter()
+                            .filter(|m| {
+                                m.pos.distance(&board.opponent.base) <= 10000
+                                    && !m.threat_state.threat_opponent()
+                                    && !m.is_controlled
+                                    && !info.assisted.contains(&m.id)
+                            })
+                            .min_by_key(|m| hero.pos.distance(&m.pos))
+                        {
+                            if hero.pos.distance(&target.pos) < CONTROL_RADIUS {
+                                info.assisted.insert(target.id);
+                                let edge_list = [
+                                    Point {
+                                        x: MAX_X + MAX_MONSTER_VELOCITY - DETECT_BASE_RADIUS,
+                                        y: MAX_Y - MAX_MONSTER_VELOCITY,
+                                    },
+                                    Point {
+                                        x: MAX_X - MAX_MONSTER_VELOCITY,
+                                        y: MAX_Y + MAX_MONSTER_VELOCITY - DETECT_BASE_RADIUS,
+                                    },
+                                ];
+
+                                let goal = edge_list.iter().min_by_key(|p| p.distance(&target.pos)).unwrap();
+                                // control で送る
+                                Action::Control {
+                                    entity_id: target.id,
+                                    point: *goal,
+                                    message: format!("[as]control"),
+                                }
+                            } else {
+                                // 近い monster に近づく
+                                let (turn, point) = self.shortest_move(&target, &hero.pos);
+                                Action::Move {
+                                    point,
+                                    message: format!("[as]shortest"),
+                                }
+                            }
+                        } else {
+                            Action::Move {
+                                point: info.home,
+                                message: format!("[as]home"),
+                            }
+                        }
+                    }
+                    HeroState::Defender(info) => {
+                        let hero = &board.player.hero_list[hero_id];
+
+                        // base に一番近いやつを殴り続ける
+                        let candidate = board
+                            .monster_list
+                            .iter()
+                            .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
+                            .min_by_key(|m| m.pos.distance(&board.player.base));
+
+                        if let Some(monster) = candidate {
+                            // FIXME: 他の手段でも防衛をする
+                            // 既に monster に追いついていて、goal されそう、かつ影響範囲内に SHIELD が効果あるキャラがいるなら、WIND!
+                            if monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                                && board
+                                    .monster_list
+                                    .iter()
+                                    .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.shield_life == 0)
+                                    .count()
+                                    > 0
+                            {
+                                let point = hero.pos * 2 - board.player.base;
+                                Action::Wind {
+                                    point,
+                                    message: format!("[def]wind"),
+                                }
+                            } else {
+                                let (_, point) = self.shortest_move(&monster, &hero.pos);
+                                Action::Move {
+                                    point,
+                                    message: format!("[def]attack"),
+                                }
+                            }
+                        } else {
+                            Action::Move {
+                                point: info.home,
+                                message: format!("[def]go home"),
+                            }
+                        }
+                    }
                 }
             })
             .collect::<Vec<_>>();
 
         // 一定条件で、状態遷移を行う
-        if board.turn == 110 {
+        if board.turn == 120 {
             self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
             self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
             self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
