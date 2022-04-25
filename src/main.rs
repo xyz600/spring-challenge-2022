@@ -298,8 +298,8 @@ impl CollectManaInfo {
     fn calculate_home_to_collect_mana(base_pos: &Point, hero_id: usize) -> Point {
         if hero_id == 0 {
             Point {
-                x: MAX_X / 2,
-                y: MAX_Y / 2,
+                x: MAX_X * 6 / 10,
+                y: MAX_Y * 6 / 10,
             }
         } else {
             let rad = std::f64::consts::PI / 6.0 * (hero_id as f64);
@@ -318,29 +318,47 @@ impl CollectManaInfo {
 }
 
 #[derive(PartialEq, Copy, Clone)]
-struct AttackerInfo {}
+struct AttackerInfo {
+    home: Point,
+}
 
 impl AttackerInfo {
     fn new() -> AttackerInfo {
-        AttackerInfo {}
+        AttackerInfo {
+            home: Point {
+                x: MAX_X - 3000,
+                y: MAX_Y - 3000,
+            },
+        }
     }
 }
 
 #[derive(PartialEq, Copy, Clone)]
-struct MidFielderInfo {}
+struct MidFielderInfo {
+    home: Point,
+}
 
 impl MidFielderInfo {
     fn new() -> MidFielderInfo {
-        MidFielderInfo {}
+        MidFielderInfo {
+            home: Point {
+                y: MAX_Y - 5000,
+                x: MAX_X - 5000,
+            },
+        }
     }
 }
 
 #[derive(PartialEq, Copy, Clone)]
-struct DefenderInfo {}
+struct DefenderInfo {
+    home: Point,
+}
 
 impl DefenderInfo {
     fn new() -> DefenderInfo {
-        DefenderInfo {}
+        DefenderInfo {
+            home: Point { y: 3000, x: 3000 },
+        }
     }
 }
 
@@ -431,6 +449,51 @@ impl Solver {
         ret
     }
 
+    /// 攻撃したい target は含んだ状態で、可能な限り hit が多い位置を探索する
+    fn enumerate_multiple_hit_with_target(
+        &self,
+        board: &Board,
+        hero_id: usize,
+        target: &Monster,
+    ) -> Vec<(usize, Point)> {
+        let mut ret = vec![];
+
+        // 3点 hit
+        for m1 in board.monster_list.iter() {
+            for m2 in board.monster_list.iter().filter(|m| m.id != m1.id) {
+                for m3 in board.monster_list.iter().filter(|m| m.id != m1.id && m.id != m2.id) {
+                    if m1.pos.distance(&m2.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && m1.pos.distance(&m3.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && m2.pos.distance(&m3.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && (m1.id == target.id || m2.id == target.id || m3.id == target.id)
+                    {
+                        // m1, m2, m3 間の各距離が全部 3/2R 以内なら、3点の重心に行くと3体に当たる
+                        let middle = (m1.pos + m2.pos + m3.pos) / 3;
+                        ret.push((3, middle));
+                    }
+                }
+            }
+        }
+
+        // 2点 hit
+        for m1 in board.monster_list.iter() {
+            for m2 in board.monster_list.iter().filter(|m| m.id != m1.id) {
+                if m1.pos.distance(&m2.pos) <= 2 * ATTACK_HIT_RADIUS && (m1.id == target.id || m2.id == target.id) {
+                    let middle = (m1.pos + m2.pos) / 2;
+                    ret.push((2, middle));
+                }
+            }
+        }
+
+        // 1点 hit
+        for m1 in board.monster_list.iter() {
+            if m1.id == target.id {
+                ret.push((1, m1.pos));
+            }
+        }
+        ret
+    }
+
     /// m を最短経路で追いかけようと思った時に必要なターン数と目指す場所
     fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
         (0..)
@@ -458,6 +521,23 @@ impl Solver {
         let hero = &board.player.hero_list[hero_id];
 
         if 1 <= hero_id {
+            // 相手 hero, monster, 自分 hero 全員 WIND 圏内にいる場合は、wind!
+            for op_hero in board.opponent.hero_list.iter() {
+                for monster in board.monster_list.iter() {
+                    if hero.pos.distance(&op_hero.pos) <= WIND_RADIUS
+                        && hero.pos.distance(&monster.pos) <= WIND_RADIUS
+                        && op_hero.pos.distance(&monster.pos) <= WIND_RADIUS
+                    {
+                        // FIXME: 相手が1手で WIND を使える条件をもっと正確に書く
+                        let point = hero.pos * 2 - board.player.base;
+                        return Action::Wind {
+                            point,
+                            message: format!("[m1]im wind"),
+                        };
+                    }
+                }
+            }
+
             // 左右2分割して、base に一番近いやつを殴り続ける
             let candidate = board
                 .monster_list
@@ -465,20 +545,45 @@ impl Solver {
                 .filter(|m| {
                     let (f, t) = self.radius_range(hero_id);
                     let angle = self.angle_from(&m.pos, &board.player.base);
-                    f <= angle && angle < t
+                    f <= angle && angle < t || m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS
                 })
                 .min_by_key(|m| m.pos.distance(&board.player.base));
 
             if let Some(monster) = candidate {
-                let (_, point) = self.shortest_move(&monster, &hero.pos);
-                Action::Move {
-                    point,
-                    message: format!("[md]go"),
+                eprintln!("hero {} target {:?} id = {}", hero_id, monster.pos, monster.id);
+                // 既に monster に追いついていて、goal されそうなら、 WIND!
+                if monster.pos.distance(&board.player.base) <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
+                    && monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                {
+                    let point = hero.pos * 2 - board.player.base;
+                    Action::Wind {
+                        point,
+                        message: format!("[m1]wind"),
+                    }
+                } else {
+                    if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
+                        // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
+                        let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
+                        assert!(!candidate.is_empty());
+                        eprintln!("{:?}", candidate);
+
+                        Action::Move {
+                            point: candidate[0].1,
+                            message: format!("[m1]{}attack", candidate[0].0),
+                        }
+                    } else {
+                        let (turn, point) = self.shortest_move(&monster, &hero.pos);
+                        eprintln!("shortest: {:?} -> {:?}: {}", hero.pos, monster.pos, turn);
+                        Action::Move {
+                            point,
+                            message: format!("[m1]shortest"),
+                        }
+                    }
                 }
             } else {
                 Action::Move {
                     point: info.home,
-                    message: format!("[md]gh"),
+                    message: format!("[m1]go home"),
                 }
             }
         } else {
@@ -488,7 +593,7 @@ impl Solver {
             if candidate.is_empty() {
                 Action::Move {
                     point: info.home,
-                    message: format!("[m]gh"),
+                    message: format!("[m2]go home"),
                 }
             } else {
                 // FIXME: 探索して、数手分で最もマナが稼げる所に移る
@@ -498,7 +603,7 @@ impl Solver {
                     if hero.pos.distance(&pos) <= MAX_PLAYER_VELOCITY {
                         return Action::Move {
                             point: *pos,
-                            message: format!("[m]c{}", hit),
+                            message: format!("[m2]attack {}", hit),
                         };
                     }
                 }
@@ -513,36 +618,69 @@ impl Solver {
 
                 Action::Move {
                     point: *target,
-                    message: format!("[m]mo"),
+                    message: format!("[m2]move only"),
                 }
             }
         }
     }
 
     fn attack(&self, board: &Board, hero_id: usize, info: &AttackerInfo) -> Action {
-        Action::Wait {
-            message: "none".to_string(),
+        Action::Move {
+            point: info.home,
+            message: format!("[at]home"),
         }
     }
 
     fn assist(&self, board: &Board, hero_id: usize, info: &MidFielderInfo) -> Action {
-        Action::Wait {
-            message: "none".to_string(),
+        Action::Move {
+            point: info.home,
+            message: format!("[as]home"),
         }
     }
 
     fn defend(&self, board: &Board, hero_id: usize, info: &DefenderInfo) -> Action {
-        Action::Wait {
-            message: "none".to_string(),
+        let hero = &board.player.hero_list[hero_id];
+
+        // base に一番近いやつを殴り続ける
+        let candidate = board
+            .monster_list
+            .iter()
+            .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
+            .min_by_key(|m| m.pos.distance(&board.player.base));
+
+        if let Some(monster) = candidate {
+            // FIXME: 他の手段でも防衛をする
+            // 既に monster に追いついていて、goal されそう、かつ影響範囲内に SHIELD が効果あるキャラがいるなら、WIND!
+            if monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                && board
+                    .monster_list
+                    .iter()
+                    .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.shield_life == 0)
+                    .count()
+                    > 0
+            {
+                let point = hero.pos * 2 - board.player.base;
+                Action::Wind {
+                    point,
+                    message: format!("[def]wind"),
+                }
+            } else {
+                let (_, point) = self.shortest_move(&monster, &hero.pos);
+                Action::Move {
+                    point,
+                    message: format!("[def]attack"),
+                }
+            }
+        } else {
+            Action::Move {
+                point: info.home,
+                message: format!("[def]go home"),
+            }
         }
     }
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
-
-        for m in board.monster_list.iter() {
-            eprintln!("{:?} {}", m.pos, self.angle_from(&m.pos, &board.player.base));
-        }
 
         let ret = (0..self.hero_size())
             .map(|hero_id| -> Action {
@@ -556,7 +694,7 @@ impl Solver {
             .collect::<Vec<_>>();
 
         // 一定条件で、状態遷移を行う
-        if board.turn == 80 {
+        if board.turn == 110 {
             self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
             self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
             self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
