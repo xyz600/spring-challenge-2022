@@ -636,7 +636,12 @@ impl Solver {
                     }
                     HeroState::Attacker(info) => {
                         let hero = &board.player.hero_list[hero_id];
-                        if info.home.distance(&hero.pos) > 2000 {
+                        if hero.shield_life == 0 {
+                            Action::Shield {
+                                entity_id: hero.id,
+                                message: format!("shield self!"),
+                            }
+                        } else if info.home.distance(&hero.pos) > 2000 {
                             Action::Move {
                                 point: info.home,
                                 message: format!("[at]home"),
@@ -674,7 +679,12 @@ impl Solver {
                         let hero = &board.player.hero_list[hero_id];
 
                         // 一番近い monster を見つける
-                        if info.home.distance(&hero.pos) > 2000 {
+                        if hero.shield_life == 0 {
+                            Action::Shield {
+                                entity_id: hero.id,
+                                message: format!("shield self!"),
+                            }
+                        } else if info.home.distance(&hero.pos) > 2000 {
                             // 前線に十分近くなければ、前線へ移動を優先
                             Action::Move {
                                 point: info.home,
@@ -729,40 +739,47 @@ impl Solver {
                     HeroState::Defender(info) => {
                         let hero = &board.player.hero_list[hero_id];
 
-                        // base に一番近いやつを殴り続ける
-                        let candidate = board
-                            .monster_list
-                            .iter()
-                            .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
-                            .min_by_key(|m| m.pos.distance(&board.player.base));
-
-                        if let Some(monster) = candidate {
-                            // FIXME: 他の手段でも防衛をする
-                            // 既に monster に追いついていて、goal されそう、かつ影響範囲内に SHIELD が効果あるキャラがいるなら、WIND!
-                            if monster.pos.distance(&hero.pos) <= WIND_RADIUS
-                                && board
-                                    .monster_list
-                                    .iter()
-                                    .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.shield_life == 0)
-                                    .count()
-                                    > 0
-                            {
-                                let point = hero.pos * 2 - board.player.base;
-                                Action::Wind {
-                                    point,
-                                    message: format!("[def]wind"),
-                                }
-                            } else {
-                                let (_, point) = self.shortest_move(&monster, &hero.pos);
-                                Action::Move {
-                                    point,
-                                    message: format!("[def]attack"),
-                                }
+                        if hero.shield_life == 0 {
+                            Action::Shield {
+                                entity_id: hero.id,
+                                message: format!("shield self!"),
                             }
                         } else {
-                            Action::Move {
-                                point: info.home,
-                                message: format!("[def]go home"),
+                            // base に一番近いやつを殴り続ける
+                            let candidate = board
+                                .monster_list
+                                .iter()
+                                .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
+                                .min_by_key(|m| m.pos.distance(&board.player.base));
+
+                            if let Some(monster) = candidate {
+                                // FIXME: 他の手段でも防衛をする
+                                // 既に monster に追いついていて、goal されそう、かつ影響範囲内に SHIELD が効果あるキャラがいるなら、WIND!
+                                if monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                                    && board
+                                        .monster_list
+                                        .iter()
+                                        .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.shield_life == 0)
+                                        .count()
+                                        > 0
+                                {
+                                    let point = hero.pos * 2 - board.player.base;
+                                    Action::Wind {
+                                        point,
+                                        message: format!("[def]wind"),
+                                    }
+                                } else {
+                                    let (_, point) = self.shortest_move(&monster, &hero.pos);
+                                    Action::Move {
+                                        point,
+                                        message: format!("[def]attack"),
+                                    }
+                                }
+                            } else {
+                                Action::Move {
+                                    point: info.home,
+                                    message: format!("[def]go home"),
+                                }
                             }
                         }
                     }
