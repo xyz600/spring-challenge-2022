@@ -71,7 +71,7 @@ macro_rules! input_old {
     };
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 struct Point {
     y: i32,
     x: i32,
@@ -149,6 +149,7 @@ impl std::ops::Mul<i32> for Point {
     }
 }
 
+#[derive(Debug)]
 struct Board {
     player: Player,
     opponent: Player,
@@ -167,6 +168,7 @@ impl Board {
     }
 }
 
+#[derive(Debug)]
 struct Player {
     health: i32,
     mana: i32,
@@ -185,6 +187,7 @@ impl Player {
     }
 }
 
+#[derive(Debug)]
 struct Hero {
     id: i32,
     pos: Point,
@@ -192,7 +195,7 @@ struct Hero {
     is_controlled: bool, // not use
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum MonsterThreatState {
     NotThreat,                 // nearBase == 0 && threatFor == 0
     PlayerThreatInTheFuture,   // nearBase == 0 && threatFor == 1
@@ -245,6 +248,7 @@ impl MonsterThreatState {
     }
 }
 
+#[derive(Debug)]
 struct Monster {
     id: i32,
     pos: Point,
@@ -292,11 +296,18 @@ struct CollectManaInfo {
 
 impl CollectManaInfo {
     fn calculate_home_to_collect_mana(base_pos: &Point, hero_id: usize) -> Point {
-        let rad = std::f64::consts::PI / 8.0 * ((hero_id + 1) as f64);
-        let radius = (DETECT_BASE_RADIUS + 2000) as f64;
-        let dx = (rad.cos() * radius) as i32;
-        let dy = (rad.sin() * radius) as i32;
-        *base_pos + Point { x: dx, y: dy }
+        if hero_id == 0 {
+            Point {
+                x: MAX_X / 2,
+                y: MAX_Y / 2,
+            }
+        } else {
+            let rad = std::f64::consts::PI / 6.0 * (hero_id as f64);
+            let radius = (DETECT_BASE_RADIUS + 1000) as f64;
+            let dx = (rad.cos() * radius) as i32;
+            let dy = (rad.sin() * radius) as i32;
+            *base_pos + Point { x: dx, y: dy }
+        }
     }
 
     fn new(base_pos: &Point, hero_id: usize) -> CollectManaInfo {
@@ -376,8 +387,10 @@ impl Solver {
         self.hero_state.len()
     }
 
-    fn enumerate_multiple_hit(&self, board: &Board) -> Vec<(usize, Point)> {
+    fn enumerate_multiple_hit(&self, board: &Board, hero_id: usize) -> Vec<(usize, Point)> {
         let mut ret = vec![];
+
+        let enable = |p: &Point| board.player.base.distance(p) > DETECT_BASE_RADIUS + 3000;
 
         // 3点 hit
         for m1 in board.monster_list.iter() {
@@ -389,7 +402,9 @@ impl Solver {
                     {
                         // m1, m2, m3 間の各距離が全部 3/2R 以内なら、3点の重心に行くと3体に当たる
                         let middle = (m1.pos + m2.pos + m3.pos) / 3;
-                        ret.push((3, middle));
+                        if enable(&middle) {
+                            ret.push((3, middle));
+                        }
                     }
                 }
             }
@@ -400,53 +415,106 @@ impl Solver {
             for m2 in board.monster_list.iter().filter(|m| m.id != m1.id) {
                 if m1.pos.distance(&m2.pos) <= 2 * ATTACK_HIT_RADIUS {
                     let middle = (m1.pos + m2.pos) / 2;
-                    ret.push((2, middle));
+                    if enable(&middle) {
+                        ret.push((2, middle));
+                    }
                 }
             }
         }
 
         // 1点 hit
         for m1 in board.monster_list.iter() {
-            ret.push((1, m1.pos));
+            if enable(&m1.pos) {
+                ret.push((1, m1.pos));
+            }
         }
-
         ret
+    }
+
+    /// m を最短経路で追いかけようと思った時に必要なターン数と目指す場所
+    fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
+        (0..)
+            .map(|turn| (turn, m.pos + m.v * turn))
+            .filter(|(turn, target)| target.distance(pos) <= ATTACK_HIT_RADIUS + MAX_PLAYER_VELOCITY * turn)
+            .next()
+            .unwrap()
+    }
+
+    fn radius_range(&self, hero_id: usize) -> (f64, f64) {
+        (
+            std::f64::consts::PI / 4.0 * ((hero_id - 1) as f64),
+            std::f64::consts::PI / 4.0 * (hero_id as f64),
+        )
+    }
+
+    fn angle_from(&self, p: &Point, b: &Point) -> f64 {
+        let dir = *p - *b;
+        let cos = dir.x as f64 / dir.norm() as f64;
+
+        cos.acos()
     }
 
     fn collect_mana(&self, board: &Board, hero_id: usize, info: &CollectManaInfo) -> Action {
         let hero = &board.player.hero_list[hero_id];
-        let candidate = self.enumerate_multiple_hit(board);
 
-        // 候補がなければ自分の home に向かう
-        if candidate.is_empty() {
-            Action::Move {
-                point: info.home,
-                message: format!("[mana] go home"),
-            }
-        } else {
-            // FIXME: 探索して、数手分で最もマナが稼げる所に移る
+        if 1 <= hero_id {
+            // 左右2分割して、base に一番近いやつを殴り続ける
+            let candidate = board
+                .monster_list
+                .iter()
+                .filter(|m| {
+                    let (f, t) = self.radius_range(hero_id);
+                    let angle = self.angle_from(&m.pos, &board.player.base);
+                    f <= angle && angle < t
+                })
+                .min_by_key(|m| m.pos.distance(&board.player.base));
 
-            // 即時効果が発揮できる場所なら、効果が高い順に移動する
-            for (hit, pos) in candidate.iter() {
-                if hero.pos.distance(&pos) <= MAX_PLAYER_VELOCITY {
-                    return Action::Move {
-                        point: *pos,
-                        message: format!("[mana {}]", hit),
-                    };
+            if let Some(monster) = candidate {
+                let (_, point) = self.shortest_move(&monster, &hero.pos);
+                Action::Move {
+                    point,
+                    message: format!("[md]go"),
+                }
+            } else {
+                Action::Move {
+                    point: info.home,
+                    message: format!("[md]gh"),
                 }
             }
+        } else {
+            let candidate = self.enumerate_multiple_hit(board, hero_id);
 
-            // hit がたくさんある、一番近いところにとりあえず移っておく
-            let target = candidate
-                .iter()
-                .filter(|p| p.0 == candidate[0].0)
-                .map(|(_, p)| p)
-                .min_by_key(|p| p.distance2(&hero.pos))
-                .unwrap();
+            // 候補がなければ自分の home に向かう
+            if candidate.is_empty() {
+                Action::Move {
+                    point: info.home,
+                    message: format!("[m]gh"),
+                }
+            } else {
+                // FIXME: 探索して、数手分で最もマナが稼げる所に移る
 
-            Action::Move {
-                point: *target,
-                message: format!("[mana] only move"),
+                // 即時効果が発揮できる場所なら、効果が高い順に移動する
+                for (hit, pos) in candidate.iter() {
+                    if hero.pos.distance(&pos) <= MAX_PLAYER_VELOCITY {
+                        return Action::Move {
+                            point: *pos,
+                            message: format!("[m]c{}", hit),
+                        };
+                    }
+                }
+
+                // hit がたくさんある、一番近いところにとりあえず移っておく
+                let target = candidate
+                    .iter()
+                    .filter(|p| p.0 == candidate[0].0)
+                    .map(|(_, p)| p)
+                    .min_by_key(|p| p.distance2(&hero.pos))
+                    .unwrap();
+
+                Action::Move {
+                    point: *target,
+                    message: format!("[m]mo"),
+                }
             }
         }
     }
@@ -471,6 +539,10 @@ impl Solver {
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
+
+        for m in board.monster_list.iter() {
+            eprintln!("{:?} {}", m.pos, self.angle_from(&m.pos, &board.player.base));
+        }
 
         let ret = (0..self.hero_size())
             .map(|hero_id| -> Action {
