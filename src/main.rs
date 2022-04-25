@@ -372,15 +372,10 @@ enum HeroState {
     Defender(DefenderInfo),
 }
 
-#[derive(PartialEq, Copy, Clone)]
-enum AttackerState {
-    InitialMove(Point),
-    Target,
-    Wind,
-}
-
 struct Solver {
     hero_state: Vec<HeroState>,
+    // 相手が自分の hero に対して一度でも妨害呪文をかけてきたか
+    is_opponent_speller: bool,
 }
 
 const MAX_X: i32 = 17630;
@@ -403,6 +398,7 @@ impl Solver {
             hero_state: (0..hero_size)
                 .map(|hero_id| HeroState::CollectMana(CollectManaInfo::new(base_pos, hero_id)))
                 .collect::<Vec<_>>(),
+            is_opponent_speller: false,
         }
     }
 
@@ -511,6 +507,12 @@ impl Solver {
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
+
+        for hero in board.player.hero_list.iter() {
+            if hero.is_controlled {
+                self.is_opponent_speller = true;
+            }
+        }
 
         let mut spell_count = 0;
 
@@ -643,7 +645,10 @@ impl Solver {
                     }
                     HeroState::Attacker(info) => {
                         let hero = &board.player.hero_list[hero_id];
-                        if hero.shield_life == 0 && board.player.mana - 10 * spell_count >= 10 {
+                        if hero.shield_life == 0
+                            && board.player.mana - 10 * spell_count >= 10
+                            && self.is_opponent_speller
+                        {
                             spell_count += 1;
                             Action::Shield {
                                 entity_id: hero.id,
@@ -690,7 +695,10 @@ impl Solver {
                         let hero = &board.player.hero_list[hero_id];
 
                         // 一番近い monster を見つける
-                        if hero.shield_life == 0 && board.player.mana - 10 * spell_count >= 10 {
+                        if hero.shield_life == 0
+                            && board.player.mana - 10 * spell_count >= 10
+                            && self.is_opponent_speller
+                        {
                             spell_count += 1;
                             Action::Shield {
                                 entity_id: hero.id,
@@ -707,7 +715,6 @@ impl Solver {
                             .iter()
                             .filter(|m| {
                                 m.pos.distance(&board.opponent.base) <= 10000
-                                    && !m.threat_state.threat_opponent()
                                     && !m.is_controlled
                                     && !info.assisted.contains(&m.id)
                             })
@@ -754,7 +761,10 @@ impl Solver {
                     HeroState::Defender(info) => {
                         let hero = &board.player.hero_list[hero_id];
 
-                        if hero.shield_life == 0 && board.player.mana - 10 * spell_count >= 10 {
+                        if hero.shield_life == 0
+                            && board.player.mana - 10 * spell_count >= 10
+                            && self.is_opponent_speller
+                        {
                             spell_count += 1;
                             Action::Shield {
                                 entity_id: hero.id,
