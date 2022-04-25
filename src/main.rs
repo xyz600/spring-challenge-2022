@@ -263,9 +263,26 @@ impl Monster {
 
 #[derive(Clone)]
 enum Action {
-    Wait { message: String },
-    Move { point: Point, message: String },
-    Wind { point: Point, message: String },
+    Wait {
+        message: String,
+    },
+    Move {
+        point: Point,
+        message: String,
+    },
+    Wind {
+        point: Point,
+        message: String,
+    },
+    Shield {
+        entity_id: i32,
+        message: String,
+    },
+    Control {
+        entity_id: i32,
+        point: Point,
+        message: String,
+    },
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -683,6 +700,15 @@ fn main() {
                 Action::Wind { point, message } => {
                     let point = point_symmetry_when_necessary(point);
                     println!("SPELL WIND {} {} {}", point.x, point.y, message);
+                }
+                Action::Shield { entity_id, message } => println!("SPELL SHIELD {} {}", entity_id, message),
+                Action::Control {
+                    entity_id,
+                    point,
+                    message,
+                } => {
+                    let point = point_symmetry_when_necessary(point);
+                    println!("SPELL CONTROL {} {} {} {}", entity_id, point.x, point.y, message);
                 }
             }
         }
