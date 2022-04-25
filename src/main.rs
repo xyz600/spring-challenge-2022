@@ -286,28 +286,59 @@ enum Action {
 }
 
 #[derive(PartialEq, Copy, Clone)]
-enum HeroState {
-    CollectMana {
-        target_monster: Option<i32>,
-    },
-    Attacker {
-        internal_state: AttackerState,
-        target_monster: Option<i32>,
-    },
-    Defender,
+struct CollectManaInfo {
+    home: Point,
 }
 
-impl HeroState {
-    fn target_monster(&self) -> Option<i32> {
-        match *self {
-            HeroState::CollectMana { target_monster } => target_monster,
-            HeroState::Attacker {
-                internal_state,
-                target_monster,
-            } => target_monster,
-            HeroState::Defender => None,
+impl CollectManaInfo {
+    fn calculate_home_to_collect_mana(base_pos: &Point, hero_id: usize) -> Point {
+        let rad = std::f64::consts::PI / 8.0 * ((hero_id + 1) as f64);
+        let radius = (DETECT_BASE_RADIUS + 2000) as f64;
+        let dx = (rad.cos() * radius) as i32;
+        let dy = (rad.sin() * radius) as i32;
+        *base_pos + Point { x: dx, y: dy }
+    }
+
+    fn new(base_pos: &Point, hero_id: usize) -> CollectManaInfo {
+        CollectManaInfo {
+            home: Self::calculate_home_to_collect_mana(base_pos, hero_id),
         }
     }
+}
+
+#[derive(PartialEq, Copy, Clone)]
+struct AttackerInfo {}
+
+impl AttackerInfo {
+    fn new() -> AttackerInfo {
+        AttackerInfo {}
+    }
+}
+
+#[derive(PartialEq, Copy, Clone)]
+struct MidFielderInfo {}
+
+impl MidFielderInfo {
+    fn new() -> MidFielderInfo {
+        MidFielderInfo {}
+    }
+}
+
+#[derive(PartialEq, Copy, Clone)]
+struct DefenderInfo {}
+
+impl DefenderInfo {
+    fn new() -> DefenderInfo {
+        DefenderInfo {}
+    }
+}
+
+#[derive(PartialEq, Copy, Clone)]
+enum HeroState {
+    CollectMana(CollectManaInfo),
+    Attacker(AttackerInfo),
+    MidFielder(MidFielderInfo),
+    Defender(DefenderInfo),
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -330,11 +361,14 @@ const MAX_MONSTER_VELOCITY: i32 = 400;
 const THREASHOLD_BASE_DAMAGE_RADIUS: i32 = 300;
 const PLAYER_DAMAGE: i32 = 2;
 const VELOCITY_DIFF: i32 = MAX_PLAYER_VELOCITY - MAX_MONSTER_VELOCITY;
+const ATTACK_HIT_RADIUS: i32 = 800;
 
 impl Solver {
-    fn new(hero_size: usize) -> Solver {
+    fn new(base_pos: &Point, hero_size: usize) -> Solver {
         Solver {
-            hero_state: vec![HeroState::CollectMana { target_monster: None }; hero_size],
+            hero_state: (0..hero_size)
+                .map(|hero_id| HeroState::CollectMana(CollectManaInfo::new(base_pos, hero_id)))
+                .collect::<Vec<_>>(),
         }
     }
 
@@ -342,223 +376,118 @@ impl Solver {
         self.hero_state.len()
     }
 
-    fn target_undecided(&self, board: &Board, hero_id: usize) -> bool {
-        // target が存在しない or target がいるけど既に board にはいない
-        if let Some(monster_id) = self.hero_state[hero_id].target_monster() {
-            if let Some(_monster) = board.monster(monster_id) {
-                false
-            } else {
-                true
+    fn enumerate_multiple_hit(&self, board: &Board) -> Vec<(usize, Point)> {
+        let mut ret = vec![];
+
+        // 3点 hit
+        for m1 in board.monster_list.iter() {
+            for m2 in board.monster_list.iter().filter(|m| m.id != m1.id) {
+                for m3 in board.monster_list.iter().filter(|m| m.id != m1.id && m.id != m2.id) {
+                    if m1.pos.distance(&m2.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && m1.pos.distance(&m3.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && m2.pos.distance(&m3.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                    {
+                        // m1, m2, m3 間の各距離が全部 3/2R 以内なら、3点の重心に行くと3体に当たる
+                        let middle = (m1.pos + m2.pos + m3.pos) / 3;
+                        ret.push((3, middle));
+                    }
+                }
+            }
+        }
+
+        // 2点 hit
+        for m1 in board.monster_list.iter() {
+            for m2 in board.monster_list.iter().filter(|m| m.id != m1.id) {
+                if m1.pos.distance(&m2.pos) <= 2 * ATTACK_HIT_RADIUS {
+                    let middle = (m1.pos + m2.pos) / 2;
+                    ret.push((2, middle));
+                }
+            }
+        }
+
+        // 1点 hit
+        for m1 in board.monster_list.iter() {
+            ret.push((1, m1.pos));
+        }
+
+        ret
+    }
+
+    fn collect_mana(&self, board: &Board, hero_id: usize, info: &CollectManaInfo) -> Action {
+        let hero = &board.player.hero_list[hero_id];
+        let candidate = self.enumerate_multiple_hit(board);
+
+        // 候補がなければ自分の home に向かう
+        if candidate.is_empty() {
+            Action::Move {
+                point: info.home,
+                message: format!("[mana] go home"),
             }
         } else {
-            true
+            // FIXME: 探索して、数手分で最もマナが稼げる所に移る
+
+            // 即時効果が発揮できる場所なら、効果が高い順に移動する
+            for (hit, pos) in candidate.iter() {
+                if hero.pos.distance(&pos) <= MAX_PLAYER_VELOCITY {
+                    return Action::Move {
+                        point: *pos,
+                        message: format!("[mana {}]", hit),
+                    };
+                }
+            }
+
+            // hit がたくさんある、一番近いところにとりあえず移っておく
+            let target = candidate
+                .iter()
+                .filter(|p| p.0 == candidate[0].0)
+                .map(|(_, p)| p)
+                .min_by_key(|p| p.distance2(&hero.pos))
+                .unwrap();
+
+            Action::Move {
+                point: *target,
+                message: format!("[mana] only move"),
+            }
         }
     }
 
-    fn calculate_home(base_pos: &Point, hero_id: usize) -> Point {
-        let rad = std::f64::consts::PI / 8.0 * ((hero_id + 1) as f64);
-        let radius = (DETECT_BASE_RADIUS + 2000) as f64;
-        let dx = (rad.cos() * radius) as i32;
-        let dy = (rad.sin() * radius) as i32;
-        *base_pos + Point { x: dx, y: dy }
+    fn attack(&self, board: &Board, hero_id: usize, info: &AttackerInfo) -> Action {
+        Action::Wait {
+            message: "none".to_string(),
+        }
+    }
+
+    fn assist(&self, board: &Board, hero_id: usize, info: &MidFielderInfo) -> Action {
+        Action::Wait {
+            message: "none".to_string(),
+        }
+    }
+
+    fn defend(&self, board: &Board, hero_id: usize, info: &DefenderInfo) -> Action {
+        Action::Wait {
+            message: "none".to_string(),
+        }
     }
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
 
-        let mut ret = vec![
-            Action::Wait {
-                message: "initial wait".to_string()
-            };
-            self.hero_size()
-        ];
-
-        for hero_id in 0..self.hero_size() {
-            let target_undecided = self.target_undecided(board, hero_id);
-            let hero = &board.player.hero_list[hero_id];
-
-            ret[hero_id] = match &mut self.hero_state[hero_id] {
-                HeroState::CollectMana { target_monster } => {
-                    // undecided になってるので、一旦消す
-                    *target_monster = None;
-
-                    // 脅威になるものを優先に、近くの敵を優先してマナを貯める
-                    // FIXME: できるだけたくさんの敵を殴れるポイントに向かう
-                    let mut candidates = board.monster_list.iter().collect::<Vec<_>>();
-                    if !candidates.is_empty() {
-                        candidates.sort_by(|m1, m2| {
-                            if m1.threat_state.threat_level() != m2.threat_state.threat_level() {
-                                m2.threat_state.threat_level().cmp(&m1.threat_state.threat_level())
-                            } else {
-                                let d1 = m1.pos.distance2(&board.player.base);
-                                let d2 = m2.pos.distance2(&board.player.base);
-                                d1.cmp(&d2)
-                            }
-                        });
-                        *target_monster = Some(candidates[0].id);
-                    }
-
-                    if let Some(monster_id) = *target_monster {
-                        // 次の state に移る
-                        const COLLECT_MANA_FINISH_TURN: usize = 80;
-                        if board.turn >= COLLECT_MANA_FINISH_TURN {
-                            self.hero_state[hero_id] = if hero_id == 0 {
-                                HeroState::Defender
-                            } else if hero_id == 1 {
-                                let point = board.opponent.base + Point { x: -8000, y: -3000 };
-                                HeroState::Attacker {
-                                    internal_state: AttackerState::InitialMove(point),
-                                    target_monster: None,
-                                }
-                            } else {
-                                let point = board.opponent.base + Point { x: -3000, y: -8000 };
-                                HeroState::Attacker {
-                                    internal_state: AttackerState::InitialMove(point),
-                                    target_monster: None,
-                                }
-                            };
-                        }
-                        Action::Move {
-                            point: board.monster(monster_id).unwrap().pos,
-                            message: format!("collect mana: target {}", monster_id),
-                        }
-                    } else {
-                        // 敵がいなかったらhome を目指す
-                        Action::Move {
-                            point: Self::calculate_home(&board.player.base, hero_id),
-                            message: format!("collect mana: enemy is none"),
-                        }
-                    }
+        let ret = (0..self.hero_size())
+            .map(|hero_id| -> Action {
+                match &self.hero_state[hero_id] {
+                    HeroState::CollectMana(info) => self.collect_mana(board, hero_id, info),
+                    HeroState::Attacker(info) => self.attack(board, hero_id, info),
+                    HeroState::MidFielder(info) => self.assist(board, hero_id, info),
+                    HeroState::Defender(info) => self.defend(board, hero_id, info),
                 }
-                HeroState::Attacker {
-                    internal_state,
-                    target_monster,
-                } => {
-                    let mut select_target = || {
-                        let mut candidates = board
-                            .monster_list
-                            .iter()
-                            .filter(|m| {
-                                let dist = board.opponent.base.distance(&m.pos);
-                                !m.threat_state.threat_opponent() && DETECT_BASE_RADIUS < dist && MAX_X / 2 <= m.pos.x
-                            })
-                            .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
-                        *target_monster = if candidates.is_empty() {
-                            None
-                        } else {
-                            candidates.sort_by_key(|m| m.pos.distance2(&hero.pos));
-                            Some(candidates[0].id)
-                        }
-                    };
-
-                    // target が決まってなかったら、選定
-                    select_target();
-
-                    match internal_state {
-                        AttackerState::InitialMove(point) => {
-                            let point = *point;
-                            // 到着したら、次のターン用に target 指定
-                            if hero.pos.distance(&point) < MAX_PLAYER_VELOCITY {
-                                *internal_state = AttackerState::Target;
-                                select_target();
-                            }
-                            // 初期配置に移動
-                            Action::Move {
-                                point,
-                                message: format!("attack: init go to ({}, {})", point.x, point.y),
-                            }
-                        }
-                        AttackerState::Target => {
-                            if let Some(monster_id) = target_monster {
-                                let monster = board.monster(*monster_id).unwrap();
-                                // wind 圏内なら Wind に遷移
-                                if hero.pos.distance(&monster.pos) <= WIND_RADIUS - VELOCITY_DIFF {
-                                    *internal_state = AttackerState::Wind;
-                                }
-                                let point = monster.pos;
-                                Action::Move {
-                                    point,
-                                    message: format!("attack: target to go ({}, {})", point.x, point.y),
-                                }
-                            } else {
-                                let point = if hero_id == 1 {
-                                    board.opponent.base + Point { x: -8000, y: -3000 }
-                                } else {
-                                    board.opponent.base + Point { x: -3000, y: -8000 }
-                                };
-                                Action::Move {
-                                    point,
-                                    message: format!("attack: cannot find enemy: go home ({}, {})", point.x, point.y),
-                                }
-                            }
-                        }
-                        AttackerState::Wind => {
-                            *internal_state = AttackerState::Target;
-                            select_target();
-
-                            // マナが残っていて、Wind 圏内に入ったら Wind !
-                            Action::Wind {
-                                point: board.opponent.base,
-                                message: format!("wind!"),
-                            }
-                        }
-                    }
-                }
-                HeroState::Defender => {
-                    // 脅威になるものを優先に、近くの敵を優先してマナを貯める
-                    // FIXME: できるだけたくさんの敵を殴れるポイントに向かう
-                    let mut candidates = board
-                        .monster_list
-                        .iter()
-                        .filter(|m| m.pos.distance(&board.player.base) < 8000)
-                        .collect::<Vec<_>>();
-
-                    if candidates.is_empty() {
-                        Action::Move {
-                            point: Point { x: 3000, y: 3000 },
-                            message: format!("defend cannot find opponent: "),
-                        }
-                    } else {
-                        // 1体でも HP を減らせる状況のキャラがいるなら、 wind したい
-                        if candidates
-                            .iter()
-                            .filter(|monster| {
-                                monster.health > 2
-                                    && board.player.base.distance(&monster.next_pos()) <= THREASHOLD_BASE_DAMAGE_RADIUS
-                            })
-                            .count()
-                            > 0
-                        {
-                            let point = hero.pos * 2 - board.player.base;
-                            Action::Wind {
-                                point,
-                                message: format!("defender: immediate avoidance ({} {})", point.x, point.y),
-                            }
-                        } else {
-                            // いないなら、一番危険な monster をマーク
-                            candidates.sort_by(|m1, m2| {
-                                let l1 = m1.threat_state.threat_level();
-                                let l2 = m2.threat_state.threat_level();
-                                if l1 != l2 {
-                                    l2.cmp(&l1)
-                                } else {
-                                    let d1 = m1.pos.distance2(&board.player.base);
-                                    let d2 = m2.pos.distance2(&board.player.base);
-                                    d1.cmp(&d2)
-                                }
-                            });
-
-                            let monster = candidates[0];
-                            let point = monster.pos;
-                            Action::Move {
-                                point,
-                                message: format!("defender: track target ({} {})", point.x, point.y),
-                            }
-                        }
-                    }
-                }
-            }
+        // 一定条件で、状態遷移を行う
+        if board.turn == 80 {
+            self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
+            self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
+            self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
         }
 
         let elapsed = (Instant::now() - start).as_millis();
@@ -605,7 +534,10 @@ fn main() {
         }
     };
 
-    let mut solver = Solver::new(heroes_per_player);
+    let mut solver = Solver::new(
+        &point_symmetry_when_necessary(Point { x: base_x, y: base_y }),
+        heroes_per_player,
+    );
 
     // game loop
     for turn in 1.. {
