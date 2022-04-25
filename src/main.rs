@@ -512,6 +512,8 @@ impl Solver {
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
 
+        let mut spell_count = 0;
+
         let ret = (0..self.hero_size())
             .map(|hero_id| -> Action {
                 let state = &mut self.hero_state[hero_id];
@@ -520,18 +522,21 @@ impl Solver {
                         let hero = &board.player.hero_list[hero_id];
                         if 1 <= hero_id {
                             // 相手 hero, monster, 自分 hero 全員 WIND 圏内にいる場合は、wind!
-                            for op_hero in board.opponent.hero_list.iter() {
-                                for monster in board.monster_list.iter() {
-                                    if hero.pos.distance(&op_hero.pos) <= WIND_RADIUS
-                                        && hero.pos.distance(&monster.pos) <= WIND_RADIUS
-                                        && op_hero.pos.distance(&monster.pos) <= WIND_RADIUS
-                                    {
-                                        // FIXME: 相手が1手で WIND を使える条件をもっと正確に書く
-                                        let point = hero.pos * 2 - board.player.base;
-                                        return Action::Wind {
-                                            point,
-                                            message: format!("[m1]im wind"),
-                                        };
+                            if board.player.mana - 10 * spell_count >= 10 {
+                                for op_hero in board.opponent.hero_list.iter() {
+                                    for monster in board.monster_list.iter() {
+                                        if hero.pos.distance(&op_hero.pos) <= WIND_RADIUS
+                                            && hero.pos.distance(&monster.pos) <= WIND_RADIUS
+                                            && op_hero.pos.distance(&monster.pos) <= WIND_RADIUS
+                                        {
+                                            // FIXME: 相手が1手で WIND を使える条件をもっと正確に書く
+                                            let point = hero.pos * 2 - board.player.base;
+                                            spell_count += 1;
+                                            return Action::Wind {
+                                                point,
+                                                message: format!("[m1]im wind"),
+                                            };
+                                        }
                                     }
                                 }
                             }
@@ -560,8 +565,10 @@ impl Solver {
                                 if monster.pos.distance(&board.player.base)
                                     <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
                                     && monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                                    && board.player.mana - 10 * spell_count >= 10
                                 {
                                     let point = hero.pos * 2 - board.player.base;
+                                    spell_count += 1;
                                     Action::Wind {
                                         point,
                                         message: format!("[m1]wind"),
@@ -636,7 +643,8 @@ impl Solver {
                     }
                     HeroState::Attacker(info) => {
                         let hero = &board.player.hero_list[hero_id];
-                        if hero.shield_life == 0 {
+                        if hero.shield_life == 0 && board.player.mana - 10 * spell_count >= 10 {
+                            spell_count += 1;
                             Action::Shield {
                                 entity_id: hero.id,
                                 message: format!("shield self!"),
@@ -656,7 +664,10 @@ impl Solver {
                             })
                             .min_by_key(|m| hero.pos.distance(&m.pos))
                         {
-                            if hero.pos.distance(&monster.pos) <= SHIELD_RADIUS {
+                            if hero.pos.distance(&monster.pos) <= SHIELD_RADIUS
+                                && board.player.mana - 10 * spell_count >= 10
+                            {
+                                spell_count += 1;
                                 Action::Shield {
                                     entity_id: monster.id,
                                     message: format!("[at]shield"),
@@ -679,7 +690,8 @@ impl Solver {
                         let hero = &board.player.hero_list[hero_id];
 
                         // 一番近い monster を見つける
-                        if hero.shield_life == 0 {
+                        if hero.shield_life == 0 && board.player.mana - 10 * spell_count >= 10 {
+                            spell_count += 1;
                             Action::Shield {
                                 entity_id: hero.id,
                                 message: format!("shield self!"),
@@ -701,7 +713,10 @@ impl Solver {
                             })
                             .min_by_key(|m| hero.pos.distance(&m.pos))
                         {
-                            if hero.pos.distance(&target.pos) < CONTROL_RADIUS {
+                            if hero.pos.distance(&target.pos) < CONTROL_RADIUS
+                                && board.player.mana - 10 * spell_count >= 10
+                            {
+                                spell_count += 1;
                                 info.assisted.insert(target.id);
                                 let edge_list = [
                                     Point {
@@ -739,7 +754,8 @@ impl Solver {
                     HeroState::Defender(info) => {
                         let hero = &board.player.hero_list[hero_id];
 
-                        if hero.shield_life == 0 {
+                        if hero.shield_life == 0 && board.player.mana - 10 * spell_count >= 10 {
+                            spell_count += 1;
                             Action::Shield {
                                 entity_id: hero.id,
                                 message: format!("shield self!"),
@@ -756,6 +772,7 @@ impl Solver {
                                 // FIXME: 他の手段でも防衛をする
                                 // 既に monster に追いついていて、goal されそう、かつ影響範囲内に SHIELD が効果あるキャラがいるなら、WIND!
                                 if monster.pos.distance(&hero.pos) <= WIND_RADIUS
+                                    && board.player.mana - 10 * spell_count >= 10
                                     && board
                                         .monster_list
                                         .iter()
@@ -764,6 +781,7 @@ impl Solver {
                                         > 0
                                 {
                                     let point = hero.pos * 2 - board.player.base;
+                                    spell_count += 1;
                                     Action::Wind {
                                         point,
                                         message: format!("[def]wind"),
