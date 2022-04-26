@@ -543,6 +543,17 @@ impl Solver {
                                 }
                             }
 
+                            if hero.shield_life == 0
+                                && board.player.mana - 10 * spell_count >= 10
+                                && self.is_opponent_speller
+                            {
+                                spell_count += 1;
+                                return Action::Shield {
+                                    entity_id: hero.id,
+                                    message: format!("[m1]shield self!"),
+                                };
+                            }
+
                             // 左右2分割して、base に一番近いやつを殴り続ける
                             let candidate = board
                                 .monster_list
@@ -609,8 +620,17 @@ impl Solver {
                             let point = info.home;
                             let candidate = self.enumerate_multiple_hit(board, hero_id);
 
-                            // 候補がなければ自分の home に向かう
-                            if candidate.is_empty() {
+                            if hero.shield_life == 0
+                                && board.player.mana - 10 * spell_count >= 10
+                                && self.is_opponent_speller
+                            {
+                                spell_count += 1;
+                                return Action::Shield {
+                                    entity_id: hero.id,
+                                    message: format!("[m1]shield self!"),
+                                };
+                            } else if candidate.is_empty() {
+                                // 候補がなければ自分の home に向かう
                                 Action::Move {
                                     point,
                                     message: format!("[m2]go home"),
