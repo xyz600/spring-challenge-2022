@@ -344,14 +344,6 @@ impl CollectManaInfo {
                 }
             }
 
-            if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller {
-                solver.spell_count += 1;
-                return Action::Shield {
-                    entity_id: hero.id,
-                    message: format!("[m1]shield self!"),
-                };
-            }
-
             let candidate = board
                 .monster_list
                 .iter()
@@ -377,22 +369,26 @@ impl CollectManaInfo {
                         point,
                         message: format!("[m1]wind"),
                     }
-                } else {
-                    if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
-                        // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
-                        let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
-                        assert!(!candidate.is_empty());
+                } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller {
+                    solver.spell_count += 1;
+                    return Action::Shield {
+                        entity_id: hero.id,
+                        message: format!("[m1]shield self!"),
+                    };
+                } else if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
+                    // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
+                    let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
+                    assert!(!candidate.is_empty());
 
-                        Action::Move {
-                            point: candidate[0].1,
-                            message: format!("[m1]{}attack", candidate[0].0),
-                        }
-                    } else {
-                        let (turn, point) = self.shortest_move(&monster, &hero.pos);
-                        Action::Move {
-                            point,
-                            message: format!("[m1]shortest"),
-                        }
+                    Action::Move {
+                        point: candidate[0].1,
+                        message: format!("[m1]{}attack", candidate[0].0),
+                    }
+                } else {
+                    let (turn, point) = self.shortest_move(&monster, &hero.pos);
+                    Action::Move {
+                        point,
+                        message: format!("[m1]shortest"),
                     }
                 }
             } else {
@@ -602,6 +598,7 @@ impl AttackerInfo {
                 .opponent
                 .hero_list
                 .iter()
+                .filter(|op_h| op_h.shield_life == 0)
                 .min_by_key(|op_h| op_h.pos.distance(&board.opponent.base))
                 .unwrap();
             if op_hero.pos.distance(&hero.pos) <= CONTROL_RADIUS && solver.can_spell(board, false) {
@@ -722,6 +719,7 @@ impl MidFielderInfo {
                 DETECT_BASE_RADIUS <= m.pos.distance(&board.opponent.base)
                     && hero.pos.distance(&m.pos) <= HERO_RECOGNIZABLE_RADIUS
                     && !m.threat_state.threat_opponent()
+                    && m.shield_life == 0
                     && board
                         .opponent
                         .hero_list
@@ -792,59 +790,57 @@ impl DefenderInfo {
     fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
         let hero = &board.player.hero_list[hero_id];
 
-        if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller {
-            solver.spell_count += 1;
-            Action::Shield {
-                entity_id: hero.id,
-                message: format!("shield self!"),
-            }
-        } else {
-            // base に一番近いやつを殴り続ける
-            let candidate = board
+        // base に一番近いやつを殴り続ける
+        let candidate = board
+            .monster_list
+            .iter()
+            .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
+            .min_by_key(|m| m.pos.distance(&board.player.base));
+
+        if let Some(monster) = candidate {
+            let around_alive = board
                 .monster_list
                 .iter()
-                .filter(|m| m.pos.distance(&board.player.base) <= DETECT_BASE_RADIUS)
-                .min_by_key(|m| m.pos.distance(&board.player.base));
+                .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.health > 2)
+                .count()
+                > 0;
+            // 既に monster に追いついていて、1撃じゃ死なない monster に goal されそうなら、 WIND!
+            if around_alive
+                && monster.pos.distance(&board.player.base) <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
+                && solver.can_spell(board, true)
+            {
+                let point = hero.pos * 2 - board.player.base;
+                solver.spell_count += 1;
+                Action::Wind {
+                    point,
+                    message: format!("[def]wind"),
+                }
+            } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller {
+                solver.spell_count += 1;
+                Action::Shield {
+                    entity_id: hero.id,
+                    message: format!("shield self!"),
+                }
+            } else if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
+                // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
+                let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
+                assert!(!candidate.is_empty());
 
-            if let Some(monster) = candidate {
-                let around_alive = board
-                    .monster_list
-                    .iter()
-                    .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.health > 2)
-                    .count()
-                    > 0;
-                // 既に monster に追いついていて、1撃じゃ死なない monster に goal されそうなら、 WIND!
-                if around_alive
-                    && monster.pos.distance(&board.player.base) <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
-                    && solver.can_spell(board, true)
-                {
-                    let point = hero.pos * 2 - board.player.base;
-                    solver.spell_count += 1;
-                    Action::Wind {
-                        point,
-                        message: format!("[def]wind"),
-                    }
-                } else if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
-                    // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
-                    let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
-                    assert!(!candidate.is_empty());
-
-                    Action::Move {
-                        point: candidate[0].1,
-                        message: format!("[m1]{}attack", candidate[0].0),
-                    }
-                } else {
-                    let (_, point) = self.shortest_move(&monster, &hero.pos);
-                    Action::Move {
-                        point,
-                        message: format!("[def]shortest"),
-                    }
+                Action::Move {
+                    point: candidate[0].1,
+                    message: format!("[m1]{}attack", candidate[0].0),
                 }
             } else {
+                let (_, point) = self.shortest_move(&monster, &hero.pos);
                 Action::Move {
-                    point: self.home,
-                    message: format!("[def]go home"),
+                    point,
+                    message: format!("[def]shortest"),
                 }
+            }
+        } else {
+            Action::Move {
+                point: self.home,
+                message: format!("[def]go home"),
             }
         }
     }
@@ -934,7 +930,7 @@ impl SolverState {
         if has_priority {
             board.player.mana - self.spell_count * 10 >= 10
         } else {
-            board.player.mana - (1 + self.spell_count) * 10 >= 10
+            board.player.mana - (2 + self.spell_count) * 10 >= 10
         }
     }
 }
