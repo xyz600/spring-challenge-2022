@@ -202,9 +202,42 @@
 
 ### 相性の悪さ
 
-* TOBIASA
-  * 僕が攻めるのが遅すぎるから、一方的に殴られて終了する
-* Linksawaking
-  * マナが枯れると何もできることが無くなる
-  * shield を張るタイミングが後段すぎて、attacker に monster を渡す前に阻害される
-    * control した直後、shield で包んであげるのが理想的だが…
+* unclassify
+  * TOBIASA
+  * Linksawaking
+* wind シュート型
+  * Samsonov
+* wind 防御型
+  * awnion
+* 速攻
+  * Emerg
+  * __NAGATO__
+* 戦略移行型(中盤を mid 3人、終盤を attacker 3人)
+  * Tatasterix
+* 三位一体型
+  * mchl12
+* 完全防御型
+  * AbsorbantLight
+  * Althea59
+  * Twibby
+  * Haitaka
+  * stdas
+  * Boulderdash
+  * seb
+  * jaberkro
+* 対策済
+  * Tatasterix
+  * 完全防御型
+  * mchl12
+
+
+### 相手の戦略を分類する
+
+* 背景
+  * 特定の相手に馬鹿みたいに勝てる戦略を作ったら、他の大多数の人に負ける戦略になってしまった
+  * 戦略設計としてどういう戦略にもある程度渡り合えるものでないと厳しいので、ありえる戦略について考えてみる
+* 分類
+  * 完全守備型
+    * 自陣にキャラが全く現れない
+  * 速攻型
+    * 開始早々に相手 hero が自陣にいる
