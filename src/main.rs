@@ -693,7 +693,12 @@ impl MidFielderInfo {
     fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
         let hero = &board.player.hero_list[hero_id];
 
-        if hero.shield_life == 0 && solver.can_spell(board) && solver.is_opponent_speller {
+        if board.player.mana <= 50 {
+            Action::Move {
+                point: self.home,
+                message: format!("[as]home 3"),
+            }
+        } else if hero.shield_life == 0 && solver.can_spell(board) && solver.is_opponent_speller {
             // 敵が邪魔をしてくるやつで、シールドが切れたら張り直す
             solver.spell_count += 1;
             Action::Shield {
