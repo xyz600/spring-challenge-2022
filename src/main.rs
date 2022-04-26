@@ -543,6 +543,8 @@ impl CollectManaInfo {
 #[derive(PartialEq, Copy, Clone)]
 struct AttackerInfo {
     home: Point,
+    idle_counter: usize,
+    home_shifted: bool,
 }
 
 impl AttackerInfo {
@@ -552,16 +554,32 @@ impl AttackerInfo {
                 x: MAX_X - 2000,
                 y: MAX_Y - 2000,
             },
+            idle_counter: 0,
+            home_shifted: false,
         }
     }
 
     fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
         let hero = &board.player.hero_list[hero_id];
+
+        // home にしばらく居座っていたら、手前で防御されている可能性が高いので、home を少し上にずらす
+        if !self.home_shifted && self.home == hero.pos {
+            self.idle_counter += 1;
+
+            if self.idle_counter == 10 {
+                self.home_shifted = true;
+                self.home.x -= 1000;
+                self.home.y -= 1000;
+            }
+        } else {
+            self.idle_counter = 0;
+        }
+
         if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller {
             solver.spell_count += 1;
             Action::Shield {
                 entity_id: hero.id,
-                message: format!("shield self!"),
+                message: format!("[at]shield self!"),
             }
         } else if self.home.distance(&hero.pos) > 4000 {
             Action::Move {
@@ -704,7 +722,7 @@ impl MidFielderInfo {
             solver.spell_count += 1;
             Action::Shield {
                 entity_id: hero.id,
-                message: format!("shield self!"),
+                message: format!("[as]shield self!"),
             }
         } else if self.home.distance(&hero.pos) > 4000 {
             // 前線に十分近くなければ、前線へ移動を優先
@@ -828,7 +846,7 @@ impl DefenderInfo {
 
                 Action::Move {
                     point: candidate[0].1,
-                    message: format!("[m1]{}attack", candidate[0].0),
+                    message: format!("[def]{}attack", candidate[0].0),
                 }
             } else {
                 let (_, point) = self.shortest_move(&monster, &hero.pos);
@@ -1011,8 +1029,10 @@ impl Solver {
             })
             .collect::<Vec<_>>();
 
-        // 一定条件で、状態遷移を行う
-        if !self.solver_state.strategy_changed && board.player.mana >= 200 {
+        // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
+        if !self.solver_state.strategy_changed && board.player.mana >= 200
+            || (board.player.mana - board.opponent.mana >= 100)
+        {
             self.solver_state.strategy_changed = true;
             self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
             self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
