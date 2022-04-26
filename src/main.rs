@@ -604,7 +604,8 @@ impl AttackerInfo {
                 .iter()
                 .min_by_key(|op_h| op_h.pos.distance(&board.opponent.base))
                 .unwrap();
-            if op_hero.pos.distance(&hero.pos) <= CONTROL_RADIUS {
+            if op_hero.pos.distance(&hero.pos) <= CONTROL_RADIUS && solver.can_spell(board, false) {
+                solver.spell_count += 1;
                 Action::Control {
                     entity_id: op_hero.id,
                     point: op_hero.pos * 2 - board.opponent.base,
@@ -701,12 +702,7 @@ impl MidFielderInfo {
     fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
         let hero = &board.player.hero_list[hero_id];
 
-        if board.player.mana <= 50 {
-            Action::Move {
-                point: self.home,
-                message: format!("[as]home 3"),
-            }
-        } else if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller {
+        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller {
             // 敵が邪魔をしてくるやつで、シールドが切れたら張り直す
             solver.spell_count += 1;
             Action::Shield {
@@ -737,11 +733,6 @@ impl MidFielderInfo {
             })
             .min_by_key(|m| hero.pos.distance(&m.pos))
         {
-            // mana 節約のため、敵キャラが近くにいない monster を control したい
-            for m in board.monster_list.iter() {
-                eprintln!("{:?}", m);
-            }
-
             // CONTROL 中に wind されると、方向を変えないので control が無駄になってしまう
 
             if hero.pos.distance(&target.pos) < CONTROL_RADIUS && solver.can_spell(board, false) {
@@ -758,12 +749,12 @@ impl MidFielderInfo {
                     },
                 ];
 
-                let goal = edge_list[solver.midfielder_countrol_count as usize % 2];
+                let goal = edge_list.iter().min_by_key(|p| p.distance(&hero.pos)).unwrap();
                 // control で送る
                 solver.midfielder_countrol_count += 1;
                 Action::Control {
                     entity_id: target.id,
-                    point: goal,
+                    point: *goal,
                     message: format!("[as]control"),
                 }
             } else {
@@ -822,9 +813,6 @@ impl DefenderInfo {
                     .filter(|m| m.pos.distance(&hero.pos) <= WIND_RADIUS && m.health > 2)
                     .count()
                     > 0;
-                for m in board.monster_list.iter() {
-                    eprintln!("{:?}", m);
-                }
                 // 既に monster に追いついていて、1撃じゃ死なない monster に goal されそうなら、 WIND!
                 if around_alive
                     && monster.pos.distance(&board.player.base) <= THREASHOLD_BASE_DAMAGE_RADIUS + MAX_MONSTER_VELOCITY
@@ -1002,6 +990,10 @@ impl Solver {
         eprintln!("opponent hero");
         for h in board.opponent.hero_list.iter() {
             eprintln!("{:?}", h);
+        }
+        eprintln!("monster");
+        for m in board.monster_list.iter() {
+            eprintln!("{} {:?}", m.pos.distance(&board.player.hero_list[2].pos), m);
         }
 
         self.solver_state.spell_count = 0;
