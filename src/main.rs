@@ -558,8 +558,8 @@ impl AttackerInfo {
     fn new() -> AttackerInfo {
         AttackerInfo {
             home: Point {
-                x: MAX_X - 2828,
-                y: MAX_Y - 2828,
+                x: MAX_X - 2000,
+                y: MAX_Y - 2000,
             },
         }
     }
@@ -897,7 +897,7 @@ enum HeroState {
     Defender(DefenderInfo),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct SolverState {
     // 相手が自分の hero に対して一度でも妨害呪文をかけてきたか
     is_opponent_speller: bool,
@@ -957,6 +957,7 @@ impl Solver {
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
 
+        eprintln!("{:?}", self.solver_state);
         for h in board.player.hero_list.iter() {
             eprintln!("{:?}", h);
         }
