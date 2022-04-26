@@ -712,7 +712,6 @@ impl MidFielderInfo {
             .filter(|m| {
                 DETECT_BASE_RADIUS <= m.pos.distance(&board.opponent.base)
                     && hero.pos.distance(&m.pos) <= HERO_RECOGNIZABLE_RADIUS
-                    && !m.is_controlled
                     && !self.assisted.contains(&m.id)
             })
             .min_by_key(|m| hero.pos.distance(&m.pos))
@@ -721,17 +720,9 @@ impl MidFielderInfo {
                 eprintln!("{:?}", m);
             }
 
-            if hero.pos.distance(&target.pos) < WIND_RADIUS
-                && solver.can_spell(board)
-                && target.threat_state.threat_opponent()
-            {
-                // monster を加速させる動きができるなら、WIND で支援
-                let goal = target.next_pos();
-                Action::Wind {
-                    point: goal,
-                    message: format!("[as]acc wind"),
-                }
-            } else if hero.pos.distance(&target.pos) < CONTROL_RADIUS && solver.can_spell(board) {
+            // CONTROL 中に wind されると、方向を変えないので control が無駄になってしまう
+
+            if hero.pos.distance(&target.pos) < CONTROL_RADIUS && solver.can_spell(board) {
                 solver.spell_count += 1;
                 self.assisted.insert(target.id);
 
