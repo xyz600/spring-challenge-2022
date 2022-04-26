@@ -417,7 +417,7 @@ impl CollectManaInfo {
                 solver.spell_count += 1;
                 return Action::Shield {
                     entity_id: hero.id,
-                    message: format!("[m1]shield self!"),
+                    message: format!("[m2]shield self!"),
                 };
             } else if candidate.is_empty() {
                 // 候補がなければ自分の home に向かう
@@ -516,13 +516,13 @@ impl CollectManaInfo {
         for m1 in board.monster_list.iter() {
             for m2 in board.monster_list.iter().filter(|m| m.id != m1.id) {
                 for m3 in board.monster_list.iter().filter(|m| m.id != m1.id && m.id != m2.id) {
-                    if m1.pos.distance(&m2.pos) <= 3 * ATTACK_HIT_RADIUS / 2
-                        && m1.pos.distance(&m3.pos) <= 3 * ATTACK_HIT_RADIUS / 2
-                        && m2.pos.distance(&m3.pos) <= 3 * ATTACK_HIT_RADIUS / 2
+                    if m1.pos.distance(&m2.next_pos()) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && m1.pos.distance(&m3.next_pos()) <= 3 * ATTACK_HIT_RADIUS / 2
+                        && m2.pos.distance(&m3.next_pos()) <= 3 * ATTACK_HIT_RADIUS / 2
                         && (m1.id == target.id || m2.id == target.id || m3.id == target.id)
                     {
                         // m1, m2, m3 間の各距離が全部 3/2R 以内なら、3点の重心に行くと3体に当たる
-                        let middle = (m1.pos + m2.pos + m3.pos) / 3;
+                        let middle = (m1.next_pos() + m2.next_pos() + m3.next_pos()) / 3;
                         ret.push((3, middle));
                     }
                 }
@@ -898,6 +898,12 @@ enum HeroState {
 }
 
 #[derive(Clone, Debug)]
+enum OpponentStrategyType {
+    NotEstimated,
+    CompletelyDefense,
+}
+
+#[derive(Clone, Debug)]
 struct SolverState {
     // 相手が自分の hero に対して一度でも妨害呪文をかけてきたか
     is_opponent_speller: bool,
@@ -907,6 +913,9 @@ struct SolverState {
     midfielder_countrol_count: i32,
 
     strategy_changed: bool,
+
+    // 相手の戦略概要の推測
+    opponent_strategy: OpponentStrategyType,
 }
 
 impl SolverState {
@@ -946,6 +955,7 @@ impl Solver {
                 spell_count: 0,
                 midfielder_countrol_count: 0,
                 strategy_changed: false,
+                opponent_strategy: OpponentStrategyType::NotEstimated,
             },
         }
     }
@@ -981,12 +991,35 @@ impl Solver {
             })
             .collect::<Vec<_>>();
 
+        if board.player.mana >= 200 {
+            // estimate opponent strategy
+            self.solver_state.opponent_strategy = if board
+                .opponent
+                .hero_list
+                .iter()
+                .filter(|op_h| board.player.base.distance(&op_h.pos) <= 6000)
+                .count()
+                == 0
+            {
+                OpponentStrategyType::CompletelyDefense
+            } else {
+                OpponentStrategyType::NotEstimated
+            };
+        }
+
         // 一定条件で、状態遷移を行う
         if !self.solver_state.strategy_changed && board.player.mana >= 200 {
             self.solver_state.strategy_changed = true;
-            self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
-            self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
-            self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
+            match self.solver_state.opponent_strategy {
+                OpponentStrategyType::NotEstimated => {
+                    self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
+                    self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
+                    self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
+                }
+                OpponentStrategyType::CompletelyDefense => {
+                    // マナ勝負をしてよいので、継続
+                }
+            }
         }
 
         let elapsed = (Instant::now() - start).as_millis();
