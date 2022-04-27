@@ -654,8 +654,8 @@ impl AttackerInfo {
                 if hero.pos.distance(&monster.pos) <= WIND_RADIUS && solver.can_spell(board, false) {
                     // wind の方が到達速度が速そう
                     solver.spell_count += 1;
-                    Action::Shield {
-                        entity_id: monster.id,
+                    Action::Wind {
+                        point: board.opponent.base,
                         message: format!("[at]shield"),
                     }
                 } else {
@@ -765,7 +765,7 @@ impl MidFielderInfo {
                     },
                 ];
 
-                let goal = edge_list.iter().min_by_key(|p| p.distance(&hero.pos)).unwrap();
+                let goal = edge_list.iter().min_by_key(|p| p.distance(&target.pos)).unwrap();
                 // control で送る
                 solver.midfielder_countrol_count += 1;
                 Action::Control {
@@ -941,6 +941,8 @@ struct SolverState {
 
     // 相手の戦略概要の推測
     opponent_strategy: OpponentStrategyType,
+
+    prev_hero_pos: Vec<Point>,
 }
 
 impl SolverState {
@@ -985,6 +987,7 @@ impl Solver {
                 midfielder_countrol_count: 0,
                 strategy_changed: false,
                 opponent_strategy: OpponentStrategyType::NotEstimated,
+                prev_hero_pos: vec![Point { x: 0, y: 0 }; 3],
             },
         }
     }
@@ -1012,8 +1015,18 @@ impl Solver {
 
         self.solver_state.spell_count = 0;
 
-        for hero in board.player.hero_list.iter() {
+        if board.turn == 1 {
+            for hero_id in 0..3 {
+                self.solver_state.prev_hero_pos[hero_id] = board.player.hero_list[hero_id].pos;
+            }
+        }
+
+        for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
             if hero.is_controlled {
+                self.solver_state.is_opponent_speller = true;
+            }
+            // WIND を使われた
+            if self.solver_state.prev_hero_pos[hero_id].distance(&hero.pos) > 1200 {
                 self.solver_state.is_opponent_speller = true;
             }
         }
@@ -1041,6 +1054,10 @@ impl Solver {
 
         let elapsed = (Instant::now() - start).as_millis();
         eprintln!("elapsed: {}[ms]", elapsed);
+
+        for hero_id in 0..3 {
+            self.solver_state.prev_hero_pos[hero_id] = board.player.hero_list[hero_id].pos;
+        }
 
         ret
     }
