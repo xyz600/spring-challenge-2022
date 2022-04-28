@@ -1,6 +1,7 @@
 use crate::app::egui::Pos2;
 use crate::app::egui::Stroke;
 use eframe::{egui, epaint::Color32, epi};
+
 use simulator::Simulator;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -8,12 +9,22 @@ use simulator::Simulator;
 #[cfg_attr(feature = "persistence", serde(default))] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
     sim: simulator::Simulator,
+    solver1: solver::Solver,
+    solver2: solver::Solver,
 }
 
 impl Default for TemplateApp {
     fn default() -> Self {
         Self {
             sim: simulator::Simulator::new(0),
+            solver1: solver::Solver::new(&simulator::IPoint::new(), 3),
+            solver2: solver::Solver::new(
+                &simulator::IPoint {
+                    x: simulator::MAX_X,
+                    y: simulator::MAX_Y,
+                },
+                3,
+            ),
         }
     }
 }
@@ -43,7 +54,7 @@ impl epi::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, frame: &epi::Frame) {
-        let Self { sim } = self;
+        let Self { sim, solver1, solver2 } = self;
 
         let scale = (simulator::MAX_X as f32) / 1080.0;
         let offset = simulator::MAP_LIMIT as f32 / scale;
@@ -55,9 +66,7 @@ impl epi::App for TemplateApp {
             // self hero
             for (player, is_self) in sim.components.player_list.iter().zip([true, false]) {
                 let color = if is_self { Color32::RED } else { Color32::BLUE };
-                eprintln!("{:?}", color);
                 for hero in player.hero_list.iter() {
-                    eprintln!("{:?}", hero.component.position);
                     // 本体
                     painter.circle(
                         Pos2 {
@@ -74,11 +83,18 @@ impl epi::App for TemplateApp {
 
         egui::TopBottomPanel::bottom("config").show(ctx, |ui| {
             if ui.button("next turn").clicked() {
-                let player_action = vec![simulator::Action::Wait { message: String::new() }; 3];
-                let opponent_action = vec![simulator::Action::Wait { message: String::new() }; 3];
+                let player1_board = sim.to_board(0);
+                let player1_action = solver1.solve(&player1_board);
 
-                sim.next_state(player_action, opponent_action);
+                let player2_board = sim.to_board(1);
+                let player2_action = solver2.solve(&player2_board);
+
+                eprintln!("player1: {:?}", player1_action);
+                eprintln!("player2: {:?}", player2_action);
+
+                sim.next_state(player1_action, player2_action);
             }
+            ui.label(format!("turn {}", sim.turn));
         });
     }
 }

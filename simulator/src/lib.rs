@@ -1133,7 +1133,10 @@ impl Simulator {
         for player in self.components.player_list.iter_mut() {
             for hero in player.hero_list.iter_mut() {
                 if let Action::Move { point, message: _ } = hero.action {
-                    hero.component.move_target.push(point);
+                    hero.component.velocity =
+                        ((point - hero.component.position).to_f64().normalize() * (MAX_HERO_VELOCITY as f64)).to();
+                    // 外に出ないための対策
+                    hero.component.position = Self::snap_to_game_zone(hero.component.next_pos());
                 }
             }
         }
@@ -1332,7 +1335,6 @@ impl Simulator {
                 board.monster_list.push(monster);
             }
         }
-
         board
     }
 
