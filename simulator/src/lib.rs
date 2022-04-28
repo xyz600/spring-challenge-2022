@@ -120,6 +120,129 @@ impl CachedRandom {
     }
 }
 
+// inout info
+
+mod inout {
+
+    pub type Point = crate::IPoint;
+
+    #[derive(Debug)]
+    pub struct Board {
+        pub player: Player,
+        pub opponent: Player,
+        pub monster_list: Vec<Monster>,
+        pub turn: usize,
+    }
+
+    impl Board {
+        pub fn monster(&self, monster_id: i32) -> Option<&Monster> {
+            for m in self.monster_list.iter() {
+                if m.id == monster_id {
+                    return Some(m);
+                }
+            }
+            None
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Player {
+        pub health: i32,
+        pub mana: i32,
+        pub base: Point,
+        pub hero_list: Vec<Hero>,
+    }
+
+    impl Player {
+        pub fn new() -> Player {
+            Player {
+                health: 0,
+                mana: 0,
+                hero_list: vec![],
+                base: Point::new(),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Hero {
+        pub id: i32,
+        pub pos: Point,
+        pub shield_life: i32,    // not use
+        pub is_controlled: bool, // not use
+    }
+
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    pub enum MonsterThreatState {
+        NotThreat,                 // nearBase == 0 && threatFor == 0
+        PlayerThreatInTheFuture,   // nearBase == 0 && threatFor == 1
+        PlayerThreat,              // nearBase == 1 && threatFor == 1
+        OpponentThreatInTheFuture, // nearBase == 0 && threatFor == 2
+        OpponentThreat,            // nearBase == 1 && threatFor == 2
+    }
+
+    impl MonsterThreatState {
+        pub fn near_base(&self) -> bool {
+            *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::OpponentThreat
+        }
+
+        pub fn threat_player(&self) -> bool {
+            *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::PlayerThreatInTheFuture
+        }
+
+        pub fn threat_opponent(&self) -> bool {
+            *self == MonsterThreatState::OpponentThreat || *self == MonsterThreatState::OpponentThreatInTheFuture
+        }
+
+        pub fn threat_level(&self) -> i64 {
+            match *self {
+                MonsterThreatState::NotThreat => 0,
+                MonsterThreatState::PlayerThreatInTheFuture => 1,
+                MonsterThreatState::PlayerThreat => 2,
+                MonsterThreatState::OpponentThreatInTheFuture => -1,
+                MonsterThreatState::OpponentThreat => -2,
+            }
+        }
+
+        pub fn to_threat_state(near_base: i32, threat_for: i32) -> MonsterThreatState {
+            if threat_for == 0 {
+                MonsterThreatState::NotThreat
+            } else if threat_for == 1 {
+                if near_base == 1 {
+                    MonsterThreatState::PlayerThreat
+                } else {
+                    MonsterThreatState::PlayerThreatInTheFuture
+                }
+            } else if threat_for == 2 {
+                if near_base == 1 {
+                    MonsterThreatState::OpponentThreat
+                } else {
+                    MonsterThreatState::OpponentThreatInTheFuture
+                }
+            } else {
+                panic!("unknown threat type");
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Monster {
+        pub id: i32,
+        pub pos: Point,
+        pub shield_life: i32,    // not use
+        pub is_controlled: bool, // not use
+        pub health: i32,
+        pub v: Point,
+        pub threat_state: MonsterThreatState,
+    }
+
+    impl Monster {
+        pub fn next_pos(&self) -> Point {
+            self.pos + self.v
+        }
+    }
+}
+
 // simulator
 
 pub trait Zero {
@@ -621,13 +744,28 @@ impl Component {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Action {
-    Wait,
-    Move { point: IPoint },
-    Wind { point: IPoint },
-    Shield { entity_id: i32 },
-    Control { entity_id: i32, point: IPoint },
+    Wait {
+        message: String,
+    },
+    Move {
+        point: IPoint,
+        message: String,
+    },
+    Wind {
+        point: IPoint,
+        message: String,
+    },
+    Shield {
+        entity_id: i32,
+        message: String,
+    },
+    Control {
+        entity_id: i32,
+        point: IPoint,
+        message: String,
+    },
 }
 
 #[derive(Debug)]
@@ -820,7 +958,7 @@ impl Simulator {
                     ComponentType::OpponentHero
                 },
             ),
-            action: Action::Wait,
+            action: Action::Wait { message: String::new() },
             is_player,
         }
     }
@@ -845,9 +983,10 @@ impl Simulator {
         }
 
         // set hero action
+        // fixme: avoid clone
         for hero_id in 0..3 {
-            self.components.player_mut().hero_list[hero_id].action = player_action[hero_id];
-            self.components.opponent_mut().hero_list[hero_id].action = opponent_action[hero_id];
+            self.components.player_mut().hero_list[hero_id].action = player_action[hero_id].clone();
+            self.components.opponent_mut().hero_list[hero_id].action = opponent_action[hero_id].clone();
         }
 
         self.activated_hero.clear();
@@ -857,8 +996,11 @@ impl Simulator {
         for player_id in 0..2 {
             for hero_id in 0..3 {
                 // control の場合
-                if let Action::Control { entity_id, point } =
-                    self.components.player_list[player_id].hero_list[hero_id].action
+                if let Action::Control {
+                    entity_id,
+                    point,
+                    message: _,
+                } = self.components.player_list[player_id].hero_list[hero_id].action
                 {
                     // マナが足りなかったら何もしない
                     if MANA_TO_SPELL <= self.components.player_list[player_id].mana
@@ -893,7 +1035,9 @@ impl Simulator {
     fn do_shield(&mut self) {
         for player_id in 0..2 {
             for hero_id in 0..3 {
-                if let Action::Shield { entity_id } = self.components.player_list[player_id].hero_list[hero_id].action {
+                if let Action::Shield { entity_id, message: _ } =
+                    self.components.player_list[player_id].hero_list[hero_id].action
+                {
                     // マナが足りなかったら何もしない
                     if MANA_TO_SPELL <= self.components.player_list[player_id].mana
                         && self.components.find_component(entity_id)
@@ -925,7 +1069,7 @@ impl Simulator {
         for player_id in 0..2 {
             for hero in self.components.player_list[player_id].hero_list.iter() {
                 // wind
-                if let Action::Wind { point } = hero.action {
+                if let Action::Wind { point, message: _ } = hero.action {
                     // マナが足りなかったら何もしない
                     if MANA_TO_SPELL <= self.components.player_list[player_id].mana {
                         // マナ消費
@@ -1037,7 +1181,7 @@ impl Simulator {
     fn move_hero(&mut self) {
         for player in self.components.player_list.iter_mut() {
             for hero in player.hero_list.iter_mut() {
-                if let Action::Move { point } = hero.action {
+                if let Action::Move { point, message: _ } = hero.action {
                     hero.component.move_target.push(point);
                 }
             }
