@@ -1,23 +1,19 @@
-use eframe::{egui, epi};
+use crate::app::egui::Pos2;
+use crate::app::egui::Stroke;
+use eframe::{egui, epaint::Color32, epi};
+use simulator::Simulator;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "persistence", serde(default))] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
-    // Example stuff:
-    label: String,
-
-    // this how you opt-out of serialization of a member
-    #[cfg_attr(feature = "persistence", serde(skip))]
-    value: f32,
+    sim: simulator::Simulator,
 }
 
 impl Default for TemplateApp {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+            sim: simulator::Simulator::new(0),
         }
     }
 }
@@ -47,67 +43,42 @@ impl epi::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, frame: &epi::Frame) {
-        let Self { label, value } = self;
+        let Self { sim } = self;
 
-        // Examples of how to create different panels and windows.
-        // Pick whichever suits you.
-        // Tip: a good default choice is to just keep the `CentralPanel`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
+        let scale = (simulator::MAX_X as f32) / 1080.0;
+        let offset = simulator::MAP_LIMIT as f32 / scale;
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            // The top panel is often a good place for a menu bar:
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Quit").clicked() {
-                        frame.quit();
-                    }
-                });
-            });
-        });
-
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            ui.heading("Side Panel");
-
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(label);
-            });
-
-            ui.add(egui::Slider::new(value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                *value += 1.0;
-            }
-
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("powered by ");
-                    ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-                    ui.label(" and ");
-                    ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/eframe");
-                });
-            });
-        });
+        let convert = |v| v / scale + offset;
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-
-            ui.heading("eframe template");
-            ui.hyperlink("https://github.com/emilk/eframe_template");
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/master/",
-                "Source code."
-            ));
-            egui::warn_if_debug_build(ui);
+            let painter = ui.painter();
+            // self hero
+            for (player, is_self) in sim.components.player_list.iter().zip([true, false]) {
+                let color = if is_self { Color32::RED } else { Color32::BLUE };
+                eprintln!("{:?}", color);
+                for hero in player.hero_list.iter() {
+                    eprintln!("{:?}", hero.component.position);
+                    // 本体
+                    painter.circle(
+                        Pos2 {
+                            x: convert(hero.component.position.x as f32),
+                            y: convert(hero.component.position.y as f32),
+                        },
+                        10.0,
+                        Color32::WHITE,
+                        Stroke { width: 5.0, color },
+                    )
+                }
+            }
         });
 
-        if false {
-            egui::Window::new("Window").show(ctx, |ui| {
-                ui.label("Windows can be moved by dragging them.");
-                ui.label("They are automatically sized based on contents.");
-                ui.label("You can turn on resizing and scrolling if you like.");
-                ui.label("You would normally chose either panels OR windows.");
-            });
-        }
+        egui::TopBottomPanel::bottom("config").show(ctx, |ui| {
+            if ui.button("next turn").clicked() {
+                let player_action = vec![simulator::Action::Wait; 3];
+                let opponent_action = vec![simulator::Action::Wait; 3];
+
+                sim.next_state(player_action, opponent_action);
+            }
+        });
     }
 }

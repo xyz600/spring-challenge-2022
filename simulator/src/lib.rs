@@ -122,8 +122,6 @@ impl CachedRandom {
 
 // simulator
 
-use std::thread::spawn;
-
 pub trait Zero {
     fn zero() -> Self;
 }
@@ -246,8 +244,8 @@ pub struct Point<T>
 where
     T: Number,
 {
-    y: T,
-    x: T,
+    pub y: T,
+    pub x: T,
 }
 
 impl Point<f64> {
@@ -472,11 +470,11 @@ impl<T: Number> Line<T> {
 }
 
 #[derive(Debug)]
-struct Player {
-    health: i32,
-    mana: i32,
-    base: IPoint,
-    hero_list: Vec<Hero>,
+pub struct Player {
+    pub health: i32,
+    pub mana: i32,
+    pub base: IPoint,
+    pub hero_list: Vec<Hero>,
 }
 
 impl Player {
@@ -506,14 +504,14 @@ impl Player {
 }
 
 #[derive(Debug, Clone)]
-struct Hero {
-    component: Component,
-    action: Action,
+pub struct Hero {
+    pub component: Component,
+    pub action: Action,
     is_player: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum MonsterThreatState {
+pub enum MonsterThreatState {
     NotThreat,                 // nearBase == 0 && threatFor == 0
     PlayerThreatInTheFuture,   // nearBase == 0 && threatFor == 1
     PlayerThreat,              // nearBase == 1 && threatFor == 1
@@ -566,9 +564,9 @@ impl MonsterThreatState {
 }
 
 #[derive(Debug, Clone)]
-struct Monster {
-    component: Component,
-    health: i32,
+pub struct Monster {
+    pub component: Component,
+    pub health: i32,
 }
 
 impl Monster {
@@ -591,14 +589,14 @@ impl ComponentType {
 }
 
 #[derive(Debug, Clone)]
-struct Component {
-    id: i32,
-    position: IPoint,
-    velocity: IPoint,
-    shield_life: i32,
-    is_controlled: bool,
+pub struct Component {
+    pub id: i32,
+    pub position: IPoint,
+    pub velocity: IPoint,
+    pub shield_life: i32,
+    pub is_controlled: bool,
+    pub max_velocity: i32,
     move_target: Vec<IPoint>,
-    max_velocity: i32,
     pushed: bool,
     component_type: ComponentType,
 }
@@ -668,16 +666,16 @@ impl System {
 }
 
 #[derive(Debug)]
-struct Components {
-    player_list: [Player; 2],
-    monster_list: Vec<Monster>,
+pub struct Components {
+    pub player_list: [Player; 2],
+    pub monster_list: Vec<Monster>,
 }
 
 impl Components {
     const PLAYER_ID: usize = 0;
-    const OPPONENT_ID: usize = 0;
+    const OPPONENT_ID: usize = 1;
 
-    fn component_iter(&self) -> impl Iterator<Item = &Component> {
+    pub fn component_iter(&self) -> impl Iterator<Item = &Component> {
         self.player()
             .hero_list
             .iter()
@@ -686,7 +684,7 @@ impl Components {
             .chain(self.monster_list.iter().map(|m| &m.component))
     }
 
-    fn component_of(&self, id: i32) -> Option<&Component> {
+    pub fn component_of(&self, id: i32) -> Option<&Component> {
         self.component_iter().filter(|c| c.id == id).next()
     }
 
@@ -717,7 +715,7 @@ impl Components {
         None
     }
 
-    fn component_len(&self) -> usize {
+    pub fn component_len(&self) -> usize {
         self.player().hero_list.len() + self.opponent().hero_list.len() + self.monster_list.len()
     }
 
@@ -725,7 +723,7 @@ impl Components {
         self.component_iter().any(|c| c.id == id)
     }
 
-    fn player(&self) -> &Player {
+    pub fn player(&self) -> &Player {
         &self.player_list[Self::PLAYER_ID]
     }
 
@@ -733,7 +731,7 @@ impl Components {
         &mut self.player_list[Self::PLAYER_ID]
     }
 
-    fn opponent(&self) -> &Player {
+    pub fn opponent(&self) -> &Player {
         &self.player_list[Self::OPPONENT_ID]
     }
 
@@ -744,34 +742,33 @@ impl Components {
 
 #[derive(Debug)]
 pub struct Simulator {
-    components: Components,
+    pub components: Components,
+    pub turn: usize,
     spawn_location: Vec<SpawnLocation>,
-    turn: usize,
-
     system: System,
 
     // FIXME: 何に使うかよくわからない
     activated_hero: Vec<i32>,
 }
 
-const MAX_X: i32 = 17630;
-const MAX_Y: i32 = 9000;
-const CENTER: IPoint = IPoint {
+pub const MAX_X: i32 = 17630;
+pub const MAX_Y: i32 = 9000;
+pub const CENTER: IPoint = IPoint {
     x: MAX_X / 2,
     y: MAX_Y / 2,
 };
-const MAP_LIMIT: i32 = 800;
-const MANA_TO_SPELL: i32 = 10;
-const MAX_HERO_VELOCITY: i32 = 800;
-const MAX_MONSTER_VELOCITY: i32 = 400;
-const SHIELD_EFFECTIVE_TURN: i32 = 12;
-const MANA_GAIN_TO_ATTACK: i32 = 2;
-const HERO_ATTACK_RADIUS: i32 = 800;
-const WIND_EFFECTIVE_RADIUS: i32 = 1280;
-const WIND_DISTANCE: i32 = 2200;
-const VISIBLE_RADIUS_FROM_BASE: i32 = 6000;
-const VISIBLE_RADIUS_FROM_HERO: i32 = 2200;
-const MOB_SPAWN_MAX_DIRECTION_DELTA: f64 = 5.0 * std::f64::consts::PI / 12.0;
+pub const MAP_LIMIT: i32 = 800;
+pub const MANA_TO_SPELL: i32 = 10;
+pub const MAX_HERO_VELOCITY: i32 = 800;
+pub const MAX_MONSTER_VELOCITY: i32 = 400;
+pub const SHIELD_EFFECTIVE_TURN: i32 = 12;
+pub const MANA_GAIN_TO_ATTACK: i32 = 2;
+pub const HERO_ATTACK_RADIUS: i32 = 800;
+pub const WIND_EFFECTIVE_RADIUS: i32 = 1280;
+pub const WIND_DISTANCE: i32 = 2200;
+pub const VISIBLE_RADIUS_FROM_BASE: i32 = 6000;
+pub const VISIBLE_RADIUS_FROM_HERO: i32 = 2200;
+pub const MOB_SPAWN_MAX_DIRECTION_DELTA: f64 = 5.0 * std::f64::consts::PI / 12.0;
 
 impl Simulator {
     pub fn new(seed: u64) -> Simulator {
