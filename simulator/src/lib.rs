@@ -125,6 +125,7 @@ impl CachedRandom {
 pub mod inout {
 
     pub type Point = crate::IPoint;
+    use crate::CENTER;
     pub use crate::{Action, MonsterThreatState};
 
     #[derive(Debug)]
@@ -154,7 +155,7 @@ pub mod inout {
                 eprintln!("  hero {}: {:?}", hero_id, hero);
             }
             eprintln!("opponent:");
-            eprintln!("  base: {:?}", self.player.base);
+            eprintln!("  base: {:?}", self.opponent.base);
             for (hero_id, hero) in self.opponent.hero_list.iter().enumerate() {
                 eprintln!("  hero {}: {:?}", hero_id, hero);
             }
@@ -163,6 +164,21 @@ pub mod inout {
                 eprintln!("  {:?}", monster);
             }
             eprintln!("----");
+        }
+
+        pub fn point_symmetry(&mut self) {
+            self.player.base = self.player.base.point_symmetry(&CENTER);
+            for hero in self.player.hero_list.iter_mut() {
+                hero.pos = hero.pos.point_symmetry(&CENTER);
+            }
+            self.opponent.base = self.opponent.base.point_symmetry(&CENTER);
+            for hero in self.opponent.hero_list.iter_mut() {
+                hero.pos = hero.pos.point_symmetry(&CENTER);
+            }
+            for monster in self.monster_list.iter_mut() {
+                monster.pos = monster.pos.point_symmetry(&CENTER);
+                monster.v = monster.v.flip();
+            }
         }
     }
 
@@ -890,6 +906,7 @@ impl Simulator {
                 random: CachedRandom::new(65535, seed),
             },
             components: Components {
+                // opponent に対しても 点対称 に回してから渡すので、opponent_base ではない
                 player_list: [Player::new(player_base), Player::new(opponent_base)],
                 monster_list: vec![],
             },
@@ -910,6 +927,7 @@ impl Simulator {
         for i in 0..3 {
             let hero = ret.create_hero(player_base, true);
             ret.components.player_mut().hero_list.push(hero);
+            // Simulator の中で opponent_base 側も点対称に回して渡すので、opponent_base ではない
             let hero = ret.create_hero(opponent_base, false);
             ret.components.opponent_mut().hero_list.push(hero);
         }
@@ -1323,6 +1341,10 @@ impl Simulator {
             };
             board.player.hero_list.push(inout_hero);
         }
+        board.player.base = IPoint {
+            x: player_id * MAX_X,
+            y: player_id * MAX_Y,
+        };
 
         // opponent hero
         board.opponent.hero_list.clear();
@@ -1336,6 +1358,10 @@ impl Simulator {
                 })
             }
         }
+        board.opponent.base = IPoint {
+            x: (1 - player_id) * MAX_X,
+            y: (1 - player_id) * MAX_Y,
+        };
 
         // monster
         board.monster_list.clear();
@@ -1355,6 +1381,9 @@ impl Simulator {
                 board.monster_list.push(monster);
             }
         }
+        // turn
+        board.turn = self.turn;
+
         board
     }
 

@@ -13,6 +13,7 @@ use eframe::{egui, epaint::Color32, epi};
 
 use simulator::IPoint;
 use simulator::Simulator;
+use simulator::CENTER;
 use simulator::MAP_LIMIT;
 use simulator::MAX_X;
 use simulator::MAX_Y;
@@ -31,13 +32,8 @@ impl Default for TemplateApp {
         Self {
             sim: simulator::Simulator::new(0),
             solver1: solver::Solver::new(&simulator::IPoint::new(), 3),
-            solver2: solver::Solver::new(
-                &simulator::IPoint {
-                    x: simulator::MAX_X,
-                    y: simulator::MAX_Y,
-                },
-                3,
-            ),
+            // simulater 側で solver2 の方は点対称に回して渡すので、IPoint(x: MAX_X, y: MAX_Y) ではない
+            solver2: solver::Solver::new(&simulator::IPoint::new(), 3),
         }
     }
 }
@@ -190,9 +186,49 @@ impl epi::App for TemplateApp {
                 player1_board.dump();
                 let player1_action = solver1.solve(&player1_board);
 
-                let player2_board = sim.to_board(1);
+                let mut player2_board = sim.to_board(1);
+                player2_board.point_symmetry();
                 player2_board.dump();
-                let player2_action = solver2.solve(&player2_board);
+                let mut player2_action = solver2.solve(&player2_board);
+                // action 反転
+                player2_action = player2_action
+                    .into_iter()
+                    .map(|action| -> simulator::Action {
+                        match action {
+                            simulator::Action::Wait { message } => simulator::Action::Wait { message },
+                            simulator::Action::Move { point, message } => simulator::Action::Move {
+                                point: point.point_symmetry(&CENTER),
+                                message,
+                            },
+                            simulator::Action::Wind { point, message } => simulator::Action::Wind {
+                                point: point.point_symmetry(&CENTER),
+                                message,
+                            },
+                            simulator::Action::Shield { entity_id, message } => {
+                                simulator::Action::Shield { entity_id, message }
+                            }
+                            simulator::Action::Control {
+                                entity_id,
+                                point,
+                                message,
+                            } => simulator::Action::Control {
+                                entity_id,
+                                point: point.point_symmetry(&CENTER),
+                                message,
+                            },
+                        }
+                    })
+                    .collect();
+
+                eprintln!("return action:");
+                eprintln!("player 1");
+                for action in player1_action.iter() {
+                    eprintln!("  {:?}", action);
+                }
+                eprintln!("player 2");
+                for action in player2_action.iter() {
+                    eprintln!("  {:?}", action);
+                }
 
                 sim.next_state(player1_action, player2_action);
             }
@@ -208,6 +244,7 @@ impl epi::App for TemplateApp {
                 egui::CollapsingHeader::new(text).default_open(true).show(ui, |ui| {
                     label!(ui, "health", player.health);
                     label!(ui, "mana", player.mana);
+                    label!(ui, "base", player.base);
                     for (hero_id, hero) in player.hero_list.iter().enumerate() {
                         egui::CollapsingHeader::new(format!("hero {}", hero_id))
                             .default_open(true)

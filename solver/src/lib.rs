@@ -108,7 +108,7 @@ impl CollectManaInfo {
             } else {
                 Action::Move {
                     point: self.home,
-                    message: format!("[m1]go home"),
+                    message: format!("[m1]go home {:?}", self.home), // FIXME: remove home
                 }
             }
         } else {
@@ -667,6 +667,17 @@ impl SolverState {
             board.player.mana - (2 + self.spell_count) * 10 >= 10
         }
     }
+
+    fn dump(&self) {
+        eprintln!("  is_opponent_speller: {}", self.is_opponent_speller);
+        eprintln!("  spell_count: {}", self.spell_count);
+        eprintln!("  midfielder_control_count: {}", self.midfielder_countrol_count);
+        eprintln!("  strategy_changed: {}", self.strategy_changed);
+        eprintln!("  prev_hero_pos: ");
+        for p in self.prev_hero_pos.iter() {
+            eprintln!("    prev_pos: {:?}", p);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -713,12 +724,15 @@ impl Solver {
     pub fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
 
-        eprintln!("{:?}", self.solver_state);
+        eprintln!("solver_state:");
+        self.solver_state.dump();
         eprintln!("self hero");
+        eprintln!("  base: {:?}", board.player.base);
         for h in board.player.hero_list.iter() {
             eprintln!("{:?}", h);
         }
         eprintln!("opponent hero");
+        eprintln!("  base: {:?}", board.opponent.base);
         for h in board.opponent.hero_list.iter() {
             eprintln!("{:?}", h);
         }
