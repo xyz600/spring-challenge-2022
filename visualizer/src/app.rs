@@ -1,8 +1,12 @@
 use crate::app::egui::Pos2;
 use crate::app::egui::Stroke;
+use eframe::egui::Painter;
 use eframe::{egui, epaint::Color32, epi};
 
+use simulator::IPoint;
 use simulator::Simulator;
+use simulator::MAX_X;
+use simulator::MAX_Y;
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
@@ -61,8 +65,39 @@ impl epi::App for TemplateApp {
 
         let convert = |v| v / scale + offset;
 
+        let draw_line = |painter: &Painter, p1: &IPoint, p2: &IPoint| {
+            let pos1 = Pos2 {
+                y: convert(p1.y as f32),
+                x: convert(p1.x as f32),
+            };
+            let pos2 = Pos2 {
+                y: convert(p2.y as f32),
+                x: convert(p2.x as f32),
+            };
+            painter.line_segment(
+                [pos1, pos2],
+                Stroke {
+                    width: 2.0,
+                    color: Color32::BLACK,
+                },
+            );
+        };
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let painter = ui.painter();
+
+            // 外枠
+            let points = [
+                IPoint { x: 0, y: 0 },
+                IPoint { x: MAX_X, y: 0 },
+                IPoint { x: MAX_X, y: MAX_Y },
+                IPoint { x: 0, y: MAX_Y },
+            ];
+
+            for i in 0..4 {
+                draw_line(painter, &points[i], &points[(i + 1) % 4]);
+            }
+
             // self hero
             for (player, is_self) in sim.components.player_list.iter().zip([true, false]) {
                 let color = if is_self { Color32::RED } else { Color32::BLUE };
@@ -73,14 +108,28 @@ impl epi::App for TemplateApp {
                             x: convert(hero.component.position.x as f32),
                             y: convert(hero.component.position.y as f32),
                         },
-                        10.0,
+                        5.0,
                         Color32::WHITE,
-                        Stroke { width: 5.0, color },
+                        Stroke { width: 2.0, color },
                     )
                 }
             }
+
+            for monster in sim.components.monster_list.iter() {
+                let color = Color32::BLACK;
+                painter.circle(
+                    Pos2 {
+                        x: convert(monster.component.position.x as f32),
+                        y: convert(monster.component.position.y as f32),
+                    },
+                    3.0,
+                    Color32::WHITE,
+                    Stroke { width: 2.0, color },
+                )
+            }
         });
 
+        // turn 数と次の状態遷移
         egui::TopBottomPanel::bottom("config").show(ctx, |ui| {
             if ui.button("next turn").clicked() {
                 let player1_board = sim.to_board(0);
@@ -96,5 +145,7 @@ impl epi::App for TemplateApp {
             }
             ui.label(format!("turn {}", sim.turn));
         });
+
+        // 情報表示
     }
 }
