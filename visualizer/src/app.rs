@@ -172,39 +172,72 @@ impl epi::App for TemplateApp {
             }
         });
 
-        let fontsize = 20.0;
-        let draw_label = |ui: &mut Ui, text: String| {
-            ui.label(RichText::new(text).font(FontId::proportional(fontsize)));
-        };
+        // let rich_text = |text: String| text;
+        let fontsize = 14.0;
+        let rich_text = |text: String| RichText::new(text).font(FontId::proportional(fontsize));
+
+        macro_rules! label {
+            ( $ui:ident, $name:expr, $e:expr ) => {
+                $ui.label(rich_text(format!("{}: {:?}", $name, $e)));
+            };
+        }
 
         // turn 数と次の状態遷移
         egui::TopBottomPanel::bottom("config").show(ctx, |ui| {
             // button
-            if ui.button("next turn").clicked() {
+            if ui.button(rich_text("next turn".to_string())).clicked() {
                 let player1_board = sim.to_board(0);
                 let player1_action = solver1.solve(&player1_board);
 
                 let player2_board = sim.to_board(1);
                 let player2_action = solver2.solve(&player2_board);
 
-                eprintln!("player1: {:?}", player1_action);
-                eprintln!("player2: {:?}", player2_action);
-
                 sim.next_state(player1_action, player2_action);
             }
-            // state
-            draw_label(ui, format!("turn: {}", sim.turn));
+            ui.label(rich_text(format!("turn: {}", sim.turn)));
+        });
 
-            // action の状態表示
-            draw_label(ui, "player 1".to_string());
-            for hero in sim.components.player().hero_list.iter() {
-                draw_label(ui, format!("{:?}", hero.action));
+        egui::SidePanel::right("info").min_width(300.0).show(ctx, |ui| {
+            for (text, player) in ["player1".to_string(), "player2".to_string()]
+                .iter()
+                .zip(sim.components.player_list.iter())
+            {
+                // hero
+                egui::CollapsingHeader::new(text).default_open(true).show(ui, |ui| {
+                    label!(ui, "health", player.health);
+                    label!(ui, "mana", player.mana);
+                    for (hero_id, hero) in player.hero_list.iter().enumerate() {
+                        egui::CollapsingHeader::new(format!("hero {}", hero_id))
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                label!(ui, "Action", hero.action);
+                                label!(ui, "Position", hero.component.position);
+                                label!(ui, "Velocity", hero.component.velocity);
+                                label!(ui, "Id", hero.component.id);
+                                label!(ui, "Shield_life", hero.component.shield_life);
+                                label!(ui, "IsControled", hero.component.is_controlled);
+                            });
+                    }
+                });
             }
 
-            draw_label(ui, "player 2".to_string());
-            for hero in sim.components.opponent().hero_list.iter() {
-                draw_label(ui, format!("{:?}", hero.action));
-            }
+            // monster
+            egui::CollapsingHeader::new("monster list")
+                .default_open(true)
+                .show(ui, |ui| {
+                    for (monster_id, monster) in sim.components.monster_list.iter().enumerate() {
+                        egui::CollapsingHeader::new(format!("monster {}", monster_id))
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                label!(ui, "Health", monster.health);
+                                label!(ui, "Position", monster.component.position);
+                                label!(ui, "Velocity", monster.component.velocity);
+                                label!(ui, "Id", monster.component.id);
+                                label!(ui, "Shield_life", monster.component.shield_life);
+                                label!(ui, "IsControled", monster.component.is_controlled);
+                            });
+                    }
+                });
         });
 
         // 情報表示
