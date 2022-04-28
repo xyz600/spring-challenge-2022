@@ -83,6 +83,7 @@ const VELOCITY_DIFF: i32 = MAX_PLAYER_VELOCITY - MAX_MONSTER_VELOCITY;
 const ATTACK_HIT_RADIUS: i32 = 800;
 const HERO_RECOGNIZABLE_RADIUS: i32 = 2200;
 
+use simulator::inout::*;
 use solver::Solver;
 
 fn main() {

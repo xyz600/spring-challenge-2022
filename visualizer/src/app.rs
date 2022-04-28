@@ -74,8 +74,8 @@ impl epi::App for TemplateApp {
 
         egui::TopBottomPanel::bottom("config").show(ctx, |ui| {
             if ui.button("next turn").clicked() {
-                let player_action = vec![simulator::Action::Wait; 3];
-                let opponent_action = vec![simulator::Action::Wait; 3];
+                let player_action = vec![simulator::Action::Wait { message: String::new() }; 3];
+                let opponent_action = vec![simulator::Action::Wait { message: String::new() }; 3];
 
                 sim.next_state(player_action, opponent_action);
             }

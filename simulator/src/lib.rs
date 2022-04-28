@@ -125,7 +125,7 @@ impl CachedRandom {
 pub mod inout {
 
     pub type Point = crate::IPoint;
-    use crate::MonsterThreatState;
+    pub use crate::{Action, MonsterThreatState};
 
     #[derive(Debug)]
     pub struct Board {
@@ -192,6 +192,8 @@ pub mod inout {
 }
 
 // simulator
+
+use inout::Board;
 
 pub trait Zero {
     fn zero() -> Self;
@@ -1275,6 +1277,96 @@ impl Simulator {
 
         for player_id in 0..2 {
             self.components.player_list[player_id].mana += mana_gain[player_id];
+        }
+    }
+
+    /// player_id にとって visible な情報だけを取得して返す
+    pub fn to_board(&self, player_id: i32) -> inout::Board {
+        let mut board = inout::Board {
+            player: inout::Player::new(),
+            opponent: inout::Player::new(),
+            monster_list: vec![],
+            turn: self.turn,
+        };
+
+        // player hero
+        board.player.hero_list.clear();
+        for hero in self.components.player_list[player_id as usize].hero_list.iter() {
+            let inout_hero = inout::Hero {
+                id: hero.component.id,
+                pos: hero.component.position,
+                shield_life: hero.component.shield_life,
+                is_controlled: hero.component.is_controlled,
+            };
+            board.player.hero_list.push(inout_hero);
+        }
+
+        // opponent hero
+        board.opponent.hero_list.clear();
+        for op_hero in self.components.player_list[1 - player_id as usize].hero_list.iter() {
+            if self.components.player_list[player_id as usize].visible(&op_hero.component.position) {
+                board.opponent.hero_list.push(inout::Hero {
+                    id: op_hero.component.id,
+                    pos: op_hero.component.position,
+                    shield_life: op_hero.component.shield_life,
+                    is_controlled: op_hero.component.is_controlled,
+                })
+            }
+        }
+
+        // monster
+        board.monster_list.clear();
+        for m in self.components.monster_list.iter() {
+            if self.components.player_list[player_id as usize].visible(&m.component.position) {
+                let mut monster = inout::Monster {
+                    id: m.component.id,
+                    pos: m.component.position,
+                    shield_life: m.component.shield_life,
+                    is_controlled: m.component.is_controlled,
+                    health: m.health,
+                    v: m.component.velocity,
+                    threat_state: MonsterThreatState::NotThreat,
+                };
+                monster.threat_state = self.decide_monster_threat(player_id, &m);
+
+                board.monster_list.push(monster);
+            }
+        }
+
+        board
+    }
+
+    fn decide_monster_threat(&self, player_id: i32, m: &Monster) -> MonsterThreatState {
+        if m.component.velocity.norm2() == 0 {
+            MonsterThreatState::NotThreat
+        } else if self.components.player_list[player_id as usize]
+            .base
+            .in_range(&m.component.position, VISIBLE_RADIUS_FROM_BASE)
+        {
+            MonsterThreatState::PlayerThreat
+        } else if self.components.player_list[1 - player_id as usize]
+            .base
+            .in_range(&m.component.position, VISIBLE_RADIUS_FROM_BASE)
+        {
+            MonsterThreatState::OpponentThreat
+        } else {
+            for turn in 1.. {
+                let p = m.component.position + m.component.velocity * turn;
+                if self.components.player_list[player_id as usize]
+                    .base
+                    .in_range(&p, VISIBLE_RADIUS_FROM_BASE)
+                {
+                    return MonsterThreatState::PlayerThreatInTheFuture;
+                } else if self.components.player_list[1 - player_id as usize]
+                    .base
+                    .in_range(&p, VISIBLE_RADIUS_FROM_BASE)
+                {
+                    return MonsterThreatState::OpponentThreatInTheFuture;
+                } else if !(0 <= p.x && p.x < MAX_X && 0 <= p.y && p.y < MAX_Y) {
+                    return MonsterThreatState::NotThreat;
+                }
+            }
+            panic!("unintentional code");
         }
     }
 }
