@@ -144,6 +144,26 @@ pub mod inout {
             }
             None
         }
+
+        pub fn dump(&self) {
+            eprintln!("----");
+            eprintln!("turn: {}", self.turn);
+            eprintln!("player:");
+            eprintln!("  base: {:?}", self.player.base);
+            for (hero_id, hero) in self.player.hero_list.iter().enumerate() {
+                eprintln!("  hero {}: {:?}", hero_id, hero);
+            }
+            eprintln!("opponent:");
+            eprintln!("  base: {:?}", self.player.base);
+            for (hero_id, hero) in self.opponent.hero_list.iter().enumerate() {
+                eprintln!("  hero {}: {:?}", hero_id, hero);
+            }
+            eprintln!("monster_list:");
+            for monster in self.monster_list.iter() {
+                eprintln!("  {:?}", monster);
+            }
+            eprintln!("----");
+        }
     }
 
     #[derive(Debug)]

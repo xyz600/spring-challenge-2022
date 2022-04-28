@@ -187,9 +187,11 @@ impl epi::App for TemplateApp {
             // button
             if ui.button(rich_text("next turn".to_string())).clicked() {
                 let player1_board = sim.to_board(0);
+                player1_board.dump();
                 let player1_action = solver1.solve(&player1_board);
 
                 let player2_board = sim.to_board(1);
+                player2_board.dump();
                 let player2_action = solver2.solve(&player2_board);
 
                 sim.next_state(player1_action, player2_action);
