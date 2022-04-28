@@ -71,6 +71,10 @@ impl CachedRandom {
         ret
     }
 
+    pub fn next_boolean(&mut self) -> bool {
+        self.next_float() <= 0.5
+    }
+
     pub fn next_int(&mut self) -> u32 {
         let ret = self.int_table[self.index];
         self.update();
@@ -118,6 +122,8 @@ impl CachedRandom {
 
 // simulator
 
+use std::thread::spawn;
+
 pub trait Zero {
     fn zero() -> Self;
 }
@@ -157,6 +163,7 @@ pub trait Number:
     + std::ops::Sub<Self, Output = Self>
     + std::ops::Div<Self, Output = Self>
     + std::ops::Mul<Self, Output = Self>
+    + std::ops::Neg<Output = Self>
     + std::marker::Sized
     + Clone
     + Copy
@@ -168,6 +175,10 @@ pub trait Number:
     fn to_f64(self) -> f64;
 
     fn from_f64(val: f64) -> Self;
+
+    fn min(self, val: Self) -> Self;
+
+    fn max(self, val: Self) -> Self;
 }
 
 impl Number for i32 {
@@ -183,6 +194,22 @@ impl Number for i32 {
         // FIXME: is round necessary ?
         val.round() as Self
     }
+
+    fn min(self, val: Self) -> Self {
+        if self < val {
+            self
+        } else {
+            val
+        }
+    }
+
+    fn max(self, val: Self) -> Self {
+        if self > val {
+            self
+        } else {
+            val
+        }
+    }
 }
 impl Number for f64 {
     fn two() -> Self {
@@ -196,6 +223,22 @@ impl Number for f64 {
     fn from_f64(val: f64) -> Self {
         val
     }
+
+    fn min(self, val: Self) -> Self {
+        if self < val {
+            self
+        } else {
+            val
+        }
+    }
+
+    fn max(self, val: Self) -> Self {
+        if self > val {
+            self
+        } else {
+            val
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -208,7 +251,7 @@ where
 }
 
 impl Point<f64> {
-    fn from<T>(self) -> Point<T>
+    fn to<T>(&self) -> Point<T>
     where
         T: Number,
     {
@@ -217,16 +260,47 @@ impl Point<f64> {
             x: T::from_f64(self.x),
         }
     }
+
+    fn rotate(&self, dir: f64) -> Point<f64> {
+        let c = dir.cos();
+        let s = dir.sin();
+
+        let nx = c * self.x - s * self.y;
+        let ny = s * self.x + c * self.y;
+        Point { y: ny, x: nx }
+    }
 }
 
 impl<T> Point<T>
 where
     T: Number,
 {
+    fn flip(&self) -> Point<T> {
+        Point { y: -self.y, x: -self.x }
+    }
+
+    fn normalize(self) -> Self {
+        self / self.norm()
+    }
+
     fn to_f64(self) -> Point<f64> {
         Point {
             y: T::to_f64(self.y),
             x: T::to_f64(self.x),
+        }
+    }
+
+    fn min(self, p: &Point<T>) -> Point<T> {
+        Point {
+            y: self.y.min(p.y),
+            x: self.x.min(p.x),
+        }
+    }
+
+    fn max(self, p: &Point<T>) -> Point<T> {
+        Point {
+            y: self.y.max(p.y),
+            x: self.x.max(p.x),
         }
     }
 
@@ -261,6 +335,10 @@ where
 
     fn in_range(&self, p: &Point<T>, radius: T) -> bool {
         return p.distance2(&self) <= radius * radius;
+    }
+
+    fn cross(&self, p: &Point<T>) -> T {
+        self.x * p.y - self.y * p.x
     }
 }
 
@@ -310,6 +388,88 @@ impl<T: Number> std::ops::Mul<T> for Point<T> {
 
 type IPoint = Point<i32>;
 type FPoint = Point<f64>;
+
+#[derive(Debug, Clone, Copy)]
+struct Line<T: Number> {
+    p1: Point<T>,
+    p2: Point<T>,
+}
+
+impl Line<f64> {
+    fn min(&self) -> Point<f64> {
+        Point {
+            y: self.p1.y.min(self.p2.y),
+            x: self.p1.x.min(self.p2.x),
+        }
+    }
+
+    fn max(&self) -> Point<f64> {
+        Point {
+            y: self.p1.y.max(self.p2.y),
+            x: self.p1.x.max(self.p2.x),
+        }
+    }
+
+    fn intersect(&self, l: &Line<f64>) -> Option<Point<f64>> {
+        let d1 = self.p1 - self.p2;
+        let d2 = l.p1 - l.p2;
+        let d = d1.cross(&d2);
+        if d == 0.0 {
+            None
+        } else {
+            let c1 = self.p1.cross(&self.p2);
+            let c2 = l.p1.cross(&l.p2);
+
+            let xi = d2.x * c1 - d1.x * c2;
+            let yi = d2.y * c1 - d1.y * c2;
+            let p = Point { x: xi, y: yi } / d;
+
+            let min_x = l.min().x.min(self.min().x);
+            let max_x = l.max().x.max(self.max().x);
+
+            if min_x <= xi && xi <= max_x {
+                Some(p)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use crate::Line;
+    use crate::Point;
+
+    #[test]
+    fn test_intersect() {
+        let l1 = Line::<f64> {
+            p1: Point { x: 150.0, y: 200.0 },
+            p2: Point { x: -150.0, y: 120.0 },
+        };
+
+        let l2 = Line::<f64> {
+            p1: Point { x: 0.0, y: 0.0 },
+            p2: Point { x: 0.0, y: 5000.0 },
+        };
+
+        if let Some(p) = l1.intersect(&l2) {
+            assert!((p.y - 160.0).abs() <= 1e-5);
+        } else {
+            assert!(false);
+        }
+    }
+}
+
+impl<T: Number> Line<T> {
+    fn to_f64(self) -> Line<f64> {
+        Line {
+            p1: self.p1.to_f64(),
+            p2: self.p2.to_f64(),
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Player {
@@ -409,7 +569,12 @@ impl MonsterThreatState {
 struct Monster {
     component: Component,
     health: i32,
-    threat_state: MonsterThreatState,
+}
+
+impl Monster {
+    fn max_health(spawn_count: i32) -> i32 {
+        (10.0 + spawn_count as f64 * 0.5) as i32
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -470,21 +635,21 @@ pub enum Action {
 #[derive(Debug)]
 struct SpawnLocation {
     // 発生場所
-    pos: IPoint,
-    // 点対称にある発生場所
-    sym_pos: IPoint,
+    pos: FPoint,
+
+    dir: FPoint,
 }
 
 impl SpawnLocation {
-    fn new(pos: IPoint) -> SpawnLocation {
+    fn new(pos: FPoint) -> SpawnLocation {
         SpawnLocation {
             pos,
-            sym_pos: pos.point_symmetry(&CENTER),
+            dir: if pos.y < MAX_Y as f64 / 2.0 {
+                FPoint { x: 0.0, y: -1.0 }
+            } else {
+                FPoint { x: 0.0, y: 1.0 }
+            },
         }
-    }
-
-    fn create(&self) -> Vec<Monster> {
-        vec![]
     }
 }
 
@@ -606,6 +771,7 @@ const WIND_EFFECTIVE_RADIUS: i32 = 1280;
 const WIND_DISTANCE: i32 = 2200;
 const VISIBLE_RADIUS_FROM_BASE: i32 = 6000;
 const VISIBLE_RADIUS_FROM_HERO: i32 = 2200;
+const MOB_SPAWN_MAX_DIRECTION_DELTA: f64 = 5.0 * std::f64::consts::PI / 12.0;
 
 impl Simulator {
     pub fn new(seed: u64) -> Simulator {
@@ -624,12 +790,12 @@ impl Simulator {
             turn: 0,
             spawn_location: vec![
                 SpawnLocation::new(Point {
-                    y: -MAP_LIMIT + 1,
-                    x: MAX_X / 2,
+                    y: (-MAP_LIMIT + 1) as f64,
+                    x: (MAX_X / 2) as f64,
                 }),
                 SpawnLocation::new(Point {
-                    y: -MAP_LIMIT + 1,
-                    x: MAX_X / 2 + 4000,
+                    y: (-MAP_LIMIT + 1) as f64,
+                    x: (MAX_X / 2 + 4000) as f64,
                 }),
             ],
             activated_hero: vec![],
@@ -702,7 +868,6 @@ impl Simulator {
                         && self.components.find_component(entity_id)
                     {
                         {
-                            // control 先を設定
                             let target = self.components.component_of(entity_id).unwrap();
                             // その player から見えなかったら違反
                             assert!(self.components.player_list[player_id].visible(&target.position));
@@ -824,9 +989,44 @@ impl Simulator {
             .any(|base| base.in_range(&p, VISIBLE_RADIUS_FROM_BASE) && !base.in_range(&np, VISIBLE_RADIUS_FROM_BASE))
     }
 
-    fn go_outside_around_base(p: &IPoint, v: &IPoint) -> bool {
-        // オリジナルな実装では、線分の交差判定で実装
-        false
+    fn go_outside_around_base(p: &IPoint, np: &IPoint) -> bool {
+        let ps: [FPoint; 6] = [
+            Point { x: 0.0, y: 0.0 },
+            Point {
+                x: VISIBLE_RADIUS_FROM_BASE as f64,
+                y: 0.0,
+            },
+            Point {
+                x: 0.0,
+                y: VISIBLE_RADIUS_FROM_BASE as f64,
+            },
+            Point {
+                x: MAX_X as f64 - 1.0,
+                y: MAX_Y as f64 - 1.0,
+            },
+            Point {
+                x: (MAX_X - VISIBLE_RADIUS_FROM_BASE) as f64 - 1.0,
+                y: MAX_Y as f64 - 1.0,
+            },
+            Point {
+                x: MAX_X as f64 - 1.0,
+                y: (MAX_Y - VISIBLE_RADIUS_FROM_BASE) as f64 - 1.0,
+            },
+        ];
+
+        let target = Line::<f64> {
+            p1: p.to_f64(),
+            p2: np.to_f64(),
+        };
+
+        [
+            Line::<f64> { p1: ps[0], p2: ps[1] },
+            Line::<f64> { p1: ps[0], p2: ps[2] },
+            Line::<f64> { p1: ps[3], p2: ps[4] },
+            Line::<f64> { p1: ps[3], p2: ps[5] },
+        ]
+        .iter()
+        .any(|l| -> bool { l.intersect(&target).is_some() })
     }
 
     // game board の外に出ずに止まる
@@ -868,11 +1068,75 @@ impl Simulator {
         mana_gain
     }
 
+    fn create_monster(&mut self, position: FPoint, velocity: IPoint) -> Vec<Monster> {
+        let mut ret = vec![];
+        let mut monster = Monster {
+            component: Component::new(
+                self.system.create_id(),
+                position.to::<i32>(),
+                MAX_MONSTER_VELOCITY,
+                ComponentType::Monster,
+            ),
+            health: Monster::max_health(self.turn as i32 / 5),
+        };
+        monster.component.velocity = velocity;
+        ret.push(monster);
+
+        // create flipped monster
+        let position = position.point_symmetry(&CENTER.to_f64());
+        let velocity = velocity.flip();
+        let mut monster = Monster {
+            component: Component::new(
+                self.system.create_id(),
+                position.to::<i32>(),
+                MAX_MONSTER_VELOCITY,
+                ComponentType::Monster,
+            ),
+            health: Monster::max_health(self.turn as i32 / 5),
+        };
+        monster.component.velocity = velocity;
+        ret.push(monster);
+        ret
+    }
+
     fn adjust_monster(&mut self) {
         // remove dead monster
         self.components.monster_list.retain(|m| m.health > 0);
 
+        let sudden_death = self.turn >= 200;
+
         // appear new monster
+        if sudden_death || self.turn % 5 == 0 {
+            for loc_id in 0..self.spawn_location.len() {
+                if sudden_death {
+                    let mut tx = self.system.random.next_int_range(0, VISIBLE_RADIUS_FROM_BASE as u32) as i32;
+                    let mut ty = self.system.random.next_int_range(0, VISIBLE_RADIUS_FROM_BASE as u32) as i32;
+                    if self.system.random.next_boolean() {
+                        tx = MAX_X - tx;
+                        ty = MAX_Y - ty;
+                    }
+                    let target = FPoint {
+                        x: tx as f64,
+                        y: ty as f64,
+                    };
+
+                    let position = self.spawn_location[loc_id].pos;
+                    let velocity = ((target - position).normalize() * MAX_MONSTER_VELOCITY as f64).to::<i32>();
+                    self.create_monster(position, velocity);
+                } else {
+                    let direction_delta = self
+                        .system
+                        .random
+                        .next_float_range(-MOB_SPAWN_MAX_DIRECTION_DELTA, MOB_SPAWN_MAX_DIRECTION_DELTA);
+
+                    let position = self.spawn_location[loc_id].pos;
+                    let velocity = (self.spawn_location[loc_id].dir.rotate(direction_delta)
+                        * MAX_MONSTER_VELOCITY as f64)
+                        .to::<i32>();
+                    self.create_monster(position, velocity);
+                }
+            }
+        }
     }
 
     fn move_monster(&mut self) {
@@ -883,7 +1147,7 @@ impl Simulator {
 
     fn countdown_shield(&mut self) {
         self.components
-            .for_each_component_mut(|c: &mut Component| c.shield_life = 0.max(c.shield_life - 1));
+            .for_each_component_mut(|c: &mut Component| c.shield_life = Number::max(0, c.shield_life - 1));
     }
 
     pub fn next_state(&mut self, player_action: Vec<Action>, opponent_action: Vec<Action>) {
@@ -916,5 +1180,9 @@ impl Simulator {
 
         // 9. New monsters appear. Dead monsters are removed.
         self.adjust_monster();
+
+        for player_id in 0..2 {
+            self.components.player_list[player_id].mana += mana_gain[player_id];
+        }
     }
 }
