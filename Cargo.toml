@@ -2,5 +2,6 @@
 
 members = [
     "bot",
-    "simulator"
+    "simulator",
+    "visualizer",
 ]
