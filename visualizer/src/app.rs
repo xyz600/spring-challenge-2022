@@ -1,10 +1,19 @@
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
 use crate::app::egui::Pos2;
 use crate::app::egui::Stroke;
+use eframe::egui::FontDefinitions;
 use eframe::egui::Painter;
+use eframe::egui::RichText;
+use eframe::egui::Ui;
+use eframe::epaint::FontFamily;
+use eframe::epaint::FontId;
 use eframe::{egui, epaint::Color32, epi};
 
 use simulator::IPoint;
 use simulator::Simulator;
+use simulator::MAP_LIMIT;
 use simulator::MAX_X;
 use simulator::MAX_Y;
 
@@ -35,7 +44,7 @@ impl Default for TemplateApp {
 
 impl epi::App for TemplateApp {
     fn name(&self) -> &str {
-        "eframe template"
+        "Spring Challenge 2022 Visualizer"
     }
 
     /// Called once before the first frame.
@@ -58,14 +67,17 @@ impl epi::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, frame: &epi::Frame) {
+        // setup fonts
+
+        // setup simulator
         let Self { sim, solver1, solver2 } = self;
 
         let scale = (simulator::MAX_X as f32) / 1080.0;
-        let offset = simulator::MAP_LIMIT as f32 / scale;
+        let offset = simulator::MAP_LIMIT as f32 / scale + 50.0;
 
         let convert = |v| v / scale + offset;
 
-        let draw_line = |painter: &Painter, p1: &IPoint, p2: &IPoint| {
+        let draw_line = |painter: &Painter, p1: &IPoint, p2: &IPoint, color: Color32| {
             let pos1 = Pos2 {
                 y: convert(p1.y as f32),
                 x: convert(p1.x as f32),
@@ -74,13 +86,15 @@ impl epi::App for TemplateApp {
                 y: convert(p2.y as f32),
                 x: convert(p2.x as f32),
             };
-            painter.line_segment(
-                [pos1, pos2],
-                Stroke {
-                    width: 2.0,
-                    color: Color32::BLACK,
-                },
-            );
+            painter.line_segment([pos1, pos2], Stroke { width: 2.0, color });
+        };
+
+        let draw_circle = |painter: &Painter, circle: &IPoint, radius: f32, color: Color32| {
+            let center = Pos2 {
+                y: convert(circle.y as f32),
+                x: convert(circle.x as f32),
+            };
+            painter.circle(center, radius, Color32::WHITE, Stroke { width: 5.0, color });
         };
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -95,42 +109,77 @@ impl epi::App for TemplateApp {
             ];
 
             for i in 0..4 {
-                draw_line(painter, &points[i], &points[(i + 1) % 4]);
+                draw_line(painter, &points[i], &points[(i + 1) % 4], Color32::BLACK);
             }
 
-            // self hero
+            // 真の外枠
+            let points = [
+                IPoint {
+                    x: -MAP_LIMIT + 1,
+                    y: -MAP_LIMIT + 1,
+                },
+                IPoint {
+                    x: MAX_X + MAP_LIMIT - 1,
+                    y: -MAP_LIMIT + 1,
+                },
+                IPoint {
+                    x: MAX_X + MAP_LIMIT - 1,
+                    y: MAX_Y + MAP_LIMIT - 1,
+                },
+                IPoint {
+                    x: -MAP_LIMIT + 1,
+                    y: MAX_Y + MAP_LIMIT - 1,
+                },
+            ];
+            for i in 0..4 {
+                draw_line(painter, &points[i], &points[(i + 1) % 4], Color32::GRAY);
+            }
+
+            let spawn_list = [
+                IPoint {
+                    x: MAX_X / 2,
+                    y: -MAP_LIMIT + 1,
+                },
+                IPoint {
+                    x: MAX_X / 2 + 4000,
+                    y: -MAP_LIMIT + 1,
+                },
+                IPoint {
+                    x: MAX_X / 2,
+                    y: MAX_Y + MAP_LIMIT - 1,
+                },
+                IPoint {
+                    x: MAX_X / 2 - 4000,
+                    y: MAX_Y + MAP_LIMIT - 1,
+                },
+            ];
+            for point in spawn_list.iter() {
+                draw_circle(painter, point, 5.0, Color32::GRAY);
+            }
+
+            // hero
             for (player, is_self) in sim.components.player_list.iter().zip([true, false]) {
                 let color = if is_self { Color32::RED } else { Color32::BLUE };
                 for hero in player.hero_list.iter() {
                     // 本体
-                    painter.circle(
-                        Pos2 {
-                            x: convert(hero.component.position.x as f32),
-                            y: convert(hero.component.position.y as f32),
-                        },
-                        5.0,
-                        Color32::WHITE,
-                        Stroke { width: 2.0, color },
-                    )
+                    draw_circle(painter, &hero.component.position, 5.0, color);
                 }
             }
 
+            // monster
             for monster in sim.components.monster_list.iter() {
-                let color = Color32::BLACK;
-                painter.circle(
-                    Pos2 {
-                        x: convert(monster.component.position.x as f32),
-                        y: convert(monster.component.position.y as f32),
-                    },
-                    3.0,
-                    Color32::WHITE,
-                    Stroke { width: 2.0, color },
-                )
+                draw_circle(painter, &monster.component.position, 5.0, Color32::BLACK);
             }
         });
 
+        let fontsize = 20.0;
+        let draw_label = |ui: &mut Ui, text: String| {
+            ui.label(RichText::new(text).font(FontId::proportional(fontsize)));
+        };
+
         // turn 数と次の状態遷移
         egui::TopBottomPanel::bottom("config").show(ctx, |ui| {
+            // button
             if ui.button("next turn").clicked() {
                 let player1_board = sim.to_board(0);
                 let player1_action = solver1.solve(&player1_board);
@@ -143,7 +192,19 @@ impl epi::App for TemplateApp {
 
                 sim.next_state(player1_action, player2_action);
             }
-            ui.label(format!("turn {}", sim.turn));
+            // state
+            draw_label(ui, format!("turn: {}", sim.turn));
+
+            // action の状態表示
+            draw_label(ui, "player 1".to_string());
+            for hero in sim.components.player().hero_list.iter() {
+                draw_label(ui, format!("{:?}", hero.action));
+            }
+
+            draw_label(ui, "player 2".to_string());
+            for hero in sim.components.opponent().hero_list.iter() {
+                draw_label(ui, format!("{:?}", hero.action));
+            }
         });
 
         // 情報表示
