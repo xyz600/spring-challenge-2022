@@ -122,9 +122,10 @@ impl CachedRandom {
 
 // inout info
 
-mod inout {
+pub mod inout {
 
     pub type Point = crate::IPoint;
+    use crate::MonsterThreatState;
 
     #[derive(Debug)]
     pub struct Board {
@@ -168,69 +169,16 @@ mod inout {
     pub struct Hero {
         pub id: i32,
         pub pos: Point,
-        pub shield_life: i32,    // not use
-        pub is_controlled: bool, // not use
-    }
-
-    #[derive(Clone, Copy, PartialEq, Debug)]
-    pub enum MonsterThreatState {
-        NotThreat,                 // nearBase == 0 && threatFor == 0
-        PlayerThreatInTheFuture,   // nearBase == 0 && threatFor == 1
-        PlayerThreat,              // nearBase == 1 && threatFor == 1
-        OpponentThreatInTheFuture, // nearBase == 0 && threatFor == 2
-        OpponentThreat,            // nearBase == 1 && threatFor == 2
-    }
-
-    impl MonsterThreatState {
-        pub fn near_base(&self) -> bool {
-            *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::OpponentThreat
-        }
-
-        pub fn threat_player(&self) -> bool {
-            *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::PlayerThreatInTheFuture
-        }
-
-        pub fn threat_opponent(&self) -> bool {
-            *self == MonsterThreatState::OpponentThreat || *self == MonsterThreatState::OpponentThreatInTheFuture
-        }
-
-        pub fn threat_level(&self) -> i64 {
-            match *self {
-                MonsterThreatState::NotThreat => 0,
-                MonsterThreatState::PlayerThreatInTheFuture => 1,
-                MonsterThreatState::PlayerThreat => 2,
-                MonsterThreatState::OpponentThreatInTheFuture => -1,
-                MonsterThreatState::OpponentThreat => -2,
-            }
-        }
-
-        pub fn to_threat_state(near_base: i32, threat_for: i32) -> MonsterThreatState {
-            if threat_for == 0 {
-                MonsterThreatState::NotThreat
-            } else if threat_for == 1 {
-                if near_base == 1 {
-                    MonsterThreatState::PlayerThreat
-                } else {
-                    MonsterThreatState::PlayerThreatInTheFuture
-                }
-            } else if threat_for == 2 {
-                if near_base == 1 {
-                    MonsterThreatState::OpponentThreat
-                } else {
-                    MonsterThreatState::OpponentThreatInTheFuture
-                }
-            } else {
-                panic!("unknown threat type");
-            }
-        }
+        pub shield_life: i32,
+        pub is_controlled: bool,
     }
 
     #[derive(Debug)]
     pub struct Monster {
         pub id: i32,
         pub pos: Point,
-        pub shield_life: i32,    // not use
-        pub is_controlled: bool, // not use
+        pub shield_life: i32,
+        pub is_controlled: bool,
         pub health: i32,
         pub v: Point,
         pub threat_state: MonsterThreatState,
@@ -396,69 +344,69 @@ impl<T> Point<T>
 where
     T: Number,
 {
-    fn flip(&self) -> Point<T> {
+    pub fn flip(&self) -> Point<T> {
         Point { y: -self.y, x: -self.x }
     }
 
-    fn normalize(self) -> Self {
+    pub fn normalize(self) -> Self {
         self / self.norm()
     }
 
-    fn to_f64(self) -> Point<f64> {
+    pub fn to_f64(self) -> Point<f64> {
         Point {
             y: T::to_f64(self.y),
             x: T::to_f64(self.x),
         }
     }
 
-    fn min(self, p: &Point<T>) -> Point<T> {
+    pub fn min(self, p: &Point<T>) -> Point<T> {
         Point {
             y: self.y.min(p.y),
             x: self.x.min(p.x),
         }
     }
 
-    fn max(self, p: &Point<T>) -> Point<T> {
+    pub fn max(self, p: &Point<T>) -> Point<T> {
         Point {
             y: self.y.max(p.y),
             x: self.x.max(p.x),
         }
     }
 
-    fn new() -> Point<T> {
+    pub fn new() -> Point<T> {
         Point {
             y: T::zero(),
             x: T::zero(),
         }
     }
 
-    fn distance2(&self, other: &Point<T>) -> T {
+    pub fn distance2(&self, other: &Point<T>) -> T {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         dx * dx + dy * dy
     }
 
-    fn distance(&self, other: &Point<T>) -> T {
+    pub fn distance(&self, other: &Point<T>) -> T {
         T::from_f64(self.to_f64().distance2(&other.to_f64()).sqrt().floor())
     }
 
-    fn norm2(&self) -> T {
+    pub fn norm2(&self) -> T {
         self.x * self.x + self.y * self.y
     }
 
-    fn norm(&self) -> T {
+    pub fn norm(&self) -> T {
         T::from_f64(self.to_f64().norm2().sqrt().floor())
     }
 
-    fn point_symmetry(&self, center: &Point<T>) -> Point<T> {
+    pub fn point_symmetry(&self, center: &Point<T>) -> Point<T> {
         *center * T::two() - *self
     }
 
-    fn in_range(&self, p: &Point<T>, radius: T) -> bool {
+    pub fn in_range(&self, p: &Point<T>, radius: T) -> bool {
         return p.distance2(&self) <= radius * radius;
     }
 
-    fn cross(&self, p: &Point<T>) -> T {
+    pub fn cross(&self, p: &Point<T>) -> T {
         self.x * p.y - self.y * p.x
     }
 }
@@ -507,8 +455,8 @@ impl<T: Number> std::ops::Mul<T> for Point<T> {
     }
 }
 
-type IPoint = Point<i32>;
-type FPoint = Point<f64>;
+pub type IPoint = Point<i32>;
+pub type FPoint = Point<f64>;
 
 #[derive(Debug, Clone, Copy)]
 struct Line<T: Number> {
@@ -601,7 +549,7 @@ pub struct Player {
 }
 
 impl Player {
-    fn new(base: IPoint) -> Player {
+    pub fn new(base: IPoint) -> Player {
         Player {
             health: 3,
             mana: 0,
@@ -611,7 +559,7 @@ impl Player {
     }
 
     // この player から p が見えるか
-    fn visible(&self, p: &IPoint) -> bool {
+    pub fn visible(&self, p: &IPoint) -> bool {
         // 自陣から
         if self.base.in_range(p, VISIBLE_RADIUS_FROM_BASE) {
             return true;
@@ -643,19 +591,19 @@ pub enum MonsterThreatState {
 }
 
 impl MonsterThreatState {
-    fn near_base(&self) -> bool {
+    pub fn near_base(&self) -> bool {
         *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::OpponentThreat
     }
 
-    fn threat_player(&self) -> bool {
+    pub fn threat_player(&self) -> bool {
         *self == MonsterThreatState::PlayerThreat || *self == MonsterThreatState::PlayerThreatInTheFuture
     }
 
-    fn threat_opponent(&self) -> bool {
+    pub fn threat_opponent(&self) -> bool {
         *self == MonsterThreatState::OpponentThreat || *self == MonsterThreatState::OpponentThreatInTheFuture
     }
 
-    fn threat_level(&self) -> i64 {
+    pub fn threat_level(&self) -> i64 {
         match *self {
             MonsterThreatState::NotThreat => 0,
             MonsterThreatState::PlayerThreatInTheFuture => 1,
@@ -665,7 +613,7 @@ impl MonsterThreatState {
         }
     }
 
-    fn to_threat_state(near_base: i32, threat_for: i32) -> MonsterThreatState {
+    pub fn to_threat_state(near_base: i32, threat_for: i32) -> MonsterThreatState {
         if threat_for == 0 {
             MonsterThreatState::NotThreat
         } else if threat_for == 1 {
@@ -690,6 +638,7 @@ impl MonsterThreatState {
 pub struct Monster {
     pub component: Component,
     pub health: i32,
+    threat_state: MonsterThreatState,
 }
 
 impl Monster {
@@ -1219,6 +1168,7 @@ impl Simulator {
                 ComponentType::Monster,
             ),
             health: Monster::max_health(self.turn as i32 / 5),
+            threat_state: MonsterThreatState::NotThreat, // FIXME: assign appropreate state
         };
         monster.component.velocity = velocity;
         ret.push(monster);
@@ -1234,6 +1184,7 @@ impl Simulator {
                 ComponentType::Monster,
             ),
             health: Monster::max_health(self.turn as i32 / 5),
+            threat_state: MonsterThreatState::NotThreat, // FIXME: assign appropreate state
         };
         monster.component.velocity = velocity;
         ret.push(monster);
