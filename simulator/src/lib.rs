@@ -768,9 +768,9 @@ impl SpawnLocation {
         SpawnLocation {
             pos,
             dir: if pos.y < MAX_Y as f64 / 2.0 {
-                FPoint { x: 0.0, y: -1.0 }
-            } else {
                 FPoint { x: 0.0, y: 1.0 }
+            } else {
+                FPoint { x: 0.0, y: -1.0 }
             },
         }
     }
@@ -1201,8 +1201,7 @@ impl Simulator {
         mana_gain
     }
 
-    fn create_monster(&mut self, position: FPoint, velocity: IPoint) -> Vec<Monster> {
-        let mut ret = vec![];
+    fn create_monster(&mut self, position: FPoint, velocity: IPoint) {
         let mut monster = Monster {
             component: Component::new(
                 self.system.create_id(),
@@ -1214,7 +1213,7 @@ impl Simulator {
             threat_state: MonsterThreatState::NotThreat, // FIXME: assign appropreate state
         };
         monster.component.velocity = velocity;
-        ret.push(monster);
+        self.components.monster_list.push(monster);
 
         // create flipped monster
         let position = position.point_symmetry(&CENTER.to_f64());
@@ -1230,13 +1229,18 @@ impl Simulator {
             threat_state: MonsterThreatState::NotThreat, // FIXME: assign appropreate state
         };
         monster.component.velocity = velocity;
-        ret.push(monster);
-        ret
+        self.components.monster_list.push(monster);
     }
 
     fn adjust_monster(&mut self) {
         // remove dead monster
-        self.components.monster_list.retain(|m| m.health > 0);
+        self.components.monster_list.retain(|m| {
+            m.health > 0
+                && -MAP_LIMIT + 1 <= m.component.position.x
+                && m.component.position.x <= MAX_X + MAP_LIMIT - 1
+                && -MAP_LIMIT + 1 <= m.component.position.y
+                && m.component.position.y <= MAX_Y + MAP_LIMIT - 1
+        });
 
         let sudden_death = self.turn >= 200;
 
@@ -1275,7 +1279,10 @@ impl Simulator {
     }
 
     fn move_monster(&mut self) {
+        let mut remove_list = vec![];
         for m in self.components.monster_list.iter_mut() {
+            // 既に盤外に出ていたら、 monster を消去
+
             m.component.position = m.component.next_pos();
         }
     }
@@ -1319,6 +1326,8 @@ impl Simulator {
         for player_id in 0..2 {
             self.components.player_list[player_id].mana += mana_gain[player_id];
         }
+
+        self.turn += 1;
     }
 
     /// player_id にとって visible な情報だけを取得して返す

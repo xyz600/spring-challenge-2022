@@ -1,18 +1,11 @@
-use std::borrow::Cow;
-use std::collections::BTreeMap;
-
 use crate::app::egui::Pos2;
 use crate::app::egui::Stroke;
-use eframe::egui::FontDefinitions;
 use eframe::egui::Painter;
 use eframe::egui::RichText;
-use eframe::egui::Ui;
-use eframe::epaint::FontFamily;
 use eframe::epaint::FontId;
 use eframe::{egui, epaint::Color32, epi};
 
 use simulator::IPoint;
-use simulator::Simulator;
 use simulator::CENTER;
 use simulator::MAP_LIMIT;
 use simulator::MAX_X;
@@ -220,16 +213,6 @@ impl epi::App for TemplateApp {
                     })
                     .collect();
 
-                eprintln!("return action:");
-                eprintln!("player 1");
-                for action in player1_action.iter() {
-                    eprintln!("  {:?}", action);
-                }
-                eprintln!("player 2");
-                for action in player2_action.iter() {
-                    eprintln!("  {:?}", action);
-                }
-
                 sim.next_state(player1_action, player2_action);
             }
             ui.label(rich_text(format!("turn: {}", sim.turn)));
@@ -278,7 +261,5 @@ impl epi::App for TemplateApp {
                     }
                 });
         });
-
-        // 情報表示
     }
 }
