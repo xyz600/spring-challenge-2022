@@ -584,6 +584,7 @@ pub struct Player {
     pub mana: i32,
     pub base: IPoint,
     pub hero_list: Vec<Hero>,
+    pub wild_mana: i32,
 }
 
 impl Player {
@@ -593,6 +594,7 @@ impl Player {
             mana: 0,
             base,
             hero_list: vec![],
+            wild_mana: 0,
         }
     }
 
@@ -683,6 +685,10 @@ impl Monster {
     fn max_health(spawn_count: i32) -> i32 {
         (10.0 + spawn_count as f64 * 0.5) as i32
     }
+
+    fn move_canceled(&self) -> bool {
+        self.component.pushed || self.health == 0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -704,9 +710,11 @@ pub struct Component {
     pub position: IPoint,
     pub velocity: IPoint,
     pub shield_life: i32,
-    pub is_controlled: bool,
     pub max_velocity: i32,
-    move_target: Vec<IPoint>,
+    // 現在のターンで反映されるべき
+    control_move_target: Vec<IPoint>,
+    // control によって、次の action で反映される動き
+    next_control_move_target: Vec<IPoint>,
     pushed: bool,
     component_type: ComponentType,
 }
@@ -718,8 +726,8 @@ impl Component {
             position,
             velocity: Point { x: 0, y: 0 },
             shield_life: 0,
-            is_controlled: false,
-            move_target: vec![],
+            control_move_target: vec![],
+            next_control_move_target: vec![],
             max_velocity,
             pushed: false,
             component_type,
@@ -728,6 +736,10 @@ impl Component {
 
     fn next_pos(&self) -> IPoint {
         self.position + self.velocity
+    }
+
+    fn is_controlled(&self) -> bool {
+        !self.control_move_target.is_empty()
     }
 }
 
@@ -890,10 +902,16 @@ pub const SHIELD_EFFECTIVE_TURN: i32 = 12;
 pub const MANA_GAIN_TO_ATTACK: i32 = 2;
 pub const HERO_ATTACK_RADIUS: i32 = 800;
 pub const WIND_EFFECTIVE_RADIUS: i32 = 1280;
+pub const CONTROL_EFFECTIVE_RADIUS: i32 = 2200;
 pub const WIND_DISTANCE: i32 = 2200;
 pub const VISIBLE_RADIUS_FROM_BASE: i32 = 6000;
 pub const VISIBLE_RADIUS_FROM_HERO: i32 = 2200;
 pub const MOB_SPAWN_MAX_DIRECTION_DELTA: f64 = 5.0 * std::f64::consts::PI / 12.0;
+
+struct ManaInfo {
+    wild_mana: i32,
+    all_mana: i32,
+}
 
 impl Simulator {
     pub fn new(seed: u64) -> Simulator {
@@ -957,17 +975,32 @@ impl Simulator {
     }
 
     fn initialize(&mut self, player_action: Vec<Action>, opponent_action: Vec<Action>) {
+        // Action のコピー
+        // 死んでる mob を削除
+        // mob の reset
+        //   - winded 解除
+        //   - 直前に行われた control を active に移動
+        //     - active が空でなければ、control での移動先を計算
+        //     - 複数 control の移動先を、最大 speed を 400 に normalize した平均を実数で取って移動
+        //   - 次の control 予約を削除
+
         // clear controlled
         for player in self.components.player_list.iter_mut() {
             for hero in player.hero_list.iter_mut() {
-                hero.component.is_controlled = false;
-                hero.component.move_target.clear();
+                std::mem::swap(
+                    &mut hero.component.control_move_target,
+                    &mut hero.component.next_control_move_target,
+                );
+                hero.component.next_control_move_target.clear();
                 hero.component.pushed = false;
             }
         }
         for monster in self.components.monster_list.iter_mut() {
-            monster.component.is_controlled = false;
-            monster.component.move_target.clear();
+            std::mem::swap(
+                &mut monster.component.control_move_target,
+                &mut monster.component.next_control_move_target,
+            );
+            monster.component.next_control_move_target.clear();
             monster.component.pushed = false;
         }
 
@@ -999,21 +1032,22 @@ impl Simulator {
                             let target = self.components.component_of(entity_id).unwrap();
                             // その player から見えなかったら違反
                             assert!(self.components.player_list[player_id].visible(&target.position));
+                            // その hero の shield 半径外にいたら違反
+                            assert!(self.components.player_list[player_id].hero_list[hero_id]
+                                .component
+                                .position
+                                .in_range(&target.position, CONTROL_EFFECTIVE_RADIUS));
                         }
 
                         // マナ消費
                         self.components.player_list[player_id].mana -= MANA_TO_SPELL;
 
-                        // 呪文を唱えることを記録。必要な情報は後から引ける
-                        self.activated_hero
-                            .push(self.components.player_list[player_id].hero_list[hero_id].component.id);
-
                         // control 先を設定
+                        // 反映は次ターン
                         let target = self.components.component_of_mut(entity_id).unwrap();
 
                         if target.shield_life == 0 {
-                            target.is_controlled = true;
-                            target.move_target.push(point);
+                            target.control_move_target.push(point);
                         }
                     }
                 }
@@ -1037,13 +1071,20 @@ impl Simulator {
 
                             // その player から見えなかったら違反
                             assert!(self.components.player_list[player_id].visible(&target.position));
+                            // その hero の shield 半径外にいたら違反
+                            assert!(self.components.player_list[player_id].hero_list[hero_id]
+                                .component
+                                .position
+                                .in_range(&target.position, CONTROL_EFFECTIVE_RADIUS));
                         }
                         // マナ消費
                         self.components.player_list[player_id].mana -= MANA_TO_SPELL;
 
                         // shield 適用先を設定
                         let target = self.components.component_of_mut(entity_id).unwrap();
+                        // shield 有効の場合、shield 魔法自体も無効
                         if target.shield_life == 0 {
+                            // 最後に decrease する分も足しておく
                             target.shield_life = SHIELD_EFFECTIVE_TURN + 1;
                         }
                     }
@@ -1052,6 +1093,7 @@ impl Simulator {
         }
     }
 
+    /// WIND は実行したら即座に場所が反映される
     fn do_wind(&mut self) {
         let mut diff = std::collections::HashMap::<i32, Vec<IPoint>>::new();
 
@@ -1078,8 +1120,9 @@ impl Simulator {
                             {
                                 assert!(point != hero.component.position);
 
-                                let dir = point - hero.component.position;
-                                let dir = dir * WIND_DISTANCE / dir.norm2();
+                                let dir = ((point - hero.component.position).to_f64().normalize()
+                                    * (WIND_DISTANCE as f64))
+                                    .to::<i32>();
                                 diff.entry(component.id).or_insert(vec![]).push(dir);
                             }
                         }
@@ -1097,6 +1140,7 @@ impl Simulator {
 
             let np = component.position + sum_diff;
 
+            // base 範囲内から外へ出る動きをする場合 || hero は、外に出ずに停止する
             if component.component_type.is_hero() || Simulator::go_outside_around_base(&component.position, &np) {
                 component.position = Simulator::snap_to_game_zone(np);
             } else {
@@ -1110,6 +1154,14 @@ impl Simulator {
                     component.velocity = Point { y: vy, x: vx };
                 }
             }
+        }
+    }
+
+    fn calculate_real_target(pos: &IPoint, target: &IPoint, speed: i32) -> IPoint {
+        if pos.in_range(&target, speed) {
+            *target
+        } else {
+            ((*target - *pos).to_f64().normalize() * (speed as f64)).to::<i32>()
         }
     }
 
@@ -1168,6 +1220,7 @@ impl Simulator {
     }
 
     fn move_hero(&mut self) {
+        // FIXME: control されたけど move している hero の影響は？
         for player in self.components.player_list.iter_mut() {
             for hero in player.hero_list.iter_mut() {
                 if let Action::Move { point, message: _ } = hero.action {
@@ -1180,8 +1233,11 @@ impl Simulator {
         }
     }
 
-    fn attack_monster(&mut self) -> [i32; 2] {
-        let mut mana_gain = [0, 0];
+    fn attack_monster(&mut self) -> [ManaInfo; 2] {
+        let mut mana_gain = [ManaInfo {
+            wild_mana: 0,
+            all_mana: 0,
+        }; 2];
 
         for monster in self.components.monster_list.iter_mut() {
             for (player_id, player) in self.components.player_list.iter_mut().enumerate() {
@@ -1192,12 +1248,17 @@ impl Simulator {
                         .in_range(&hero.component.position, HERO_ATTACK_RADIUS)
                     {
                         monster.health -= MANA_GAIN_TO_ATTACK;
-                        mana_gain[player_id] += MANA_GAIN_TO_ATTACK;
+                        mana_gain[player_id].all_mana += MANA_GAIN_TO_ATTACK;
+                        if player
+                            .base
+                            .in_range(&monster.component.position, VISIBLE_RADIUS_FROM_BASE)
+                        {
+                            mana_gain[player_id].wild_mana += MANA_GAIN_TO_ATTACK;
+                        }
                     }
                 }
             }
         }
-
         mana_gain
     }
 
@@ -1278,10 +1339,36 @@ impl Simulator {
         }
     }
 
+    fn is_in_gameboard(p: &Point<i32>) -> bool {
+        -MAP_LIMIT <= p.x && p.x <= MAX_X + MAP_LIMIT && -MAP_LIMIT <= p.y && p.x <= MAX_Y + MAP_LIMIT
+    }
+
     fn move_monster(&mut self) {
-        let mut remove_list = vec![];
         for m in self.components.monster_list.iter_mut() {
-            // 既に盤外に出ていたら、 monster を消去
+            // 既に盤外に出ていたら無視（initialize で実際に削除）
+            if !Simulator::is_in_gameboard(&m.component.position) {
+                continue;
+            }
+
+            // 移動キャンセル出ていなかったら、以下
+            if !m.move_canceled() {
+                // 1. control されていたら、その通りに動く
+                // FIXME: f64 で計算してない
+                if m.component.is_controlled() {
+                    let averaged_target = m
+                        .component
+                        .control_move_target
+                        .iter()
+                        .map(|p| Self::calculate_real_target(&m.component.position, &p, MAX_MONSTER_VELOCITY))
+                        .fold(Point::new(), |l, r| l + r) / m.component.control_move_target.len() as i32;
+                    let np =
+                    if Self::go_outside_around_base(&m.component.position, np)
+
+                } else {
+                    // 2. そうでなければ、設定された velocity を基に動く
+                    m.component.position = m.component.next_pos();
+                }
+            }
 
             m.component.position = m.component.next_pos();
         }
@@ -1292,6 +1379,7 @@ impl Simulator {
             .for_each_component_mut(|c: &mut Component| c.shield_life = Number::max(0, c.shield_life - 1));
     }
 
+    // original code の gameTurn 相当（ただし、各プレイヤーの action は事前に貰っているものとする）
     pub fn next_state(&mut self, player_action: Vec<Action>, opponent_action: Vec<Action>) {
         // 0. (self) clear hero state
         self.initialize(player_action, opponent_action);
@@ -1324,13 +1412,14 @@ impl Simulator {
         self.adjust_monster();
 
         for player_id in 0..2 {
-            self.components.player_list[player_id].mana += mana_gain[player_id];
+            self.components.player_list[player_id].mana += mana_gain[player_id].all_mana;
         }
 
         self.turn += 1;
     }
 
     /// player_id にとって visible な情報だけを取得して返す
+    /// オリジナルコードの sendGameStateFor()
     pub fn to_board(&self, player_id: i32) -> inout::Board {
         let mut board = inout::Board {
             player: inout::Player::new(),
@@ -1346,7 +1435,7 @@ impl Simulator {
                 id: hero.component.id,
                 pos: hero.component.position,
                 shield_life: hero.component.shield_life,
-                is_controlled: hero.component.is_controlled,
+                is_controlled: hero.component.is_controlled(),
             };
             board.player.hero_list.push(inout_hero);
         }
@@ -1363,7 +1452,7 @@ impl Simulator {
                     id: op_hero.component.id,
                     pos: op_hero.component.position,
                     shield_life: op_hero.component.shield_life,
-                    is_controlled: op_hero.component.is_controlled,
+                    is_controlled: op_hero.component.is_controlled(),
                 })
             }
         }
@@ -1380,7 +1469,7 @@ impl Simulator {
                     id: m.component.id,
                     pos: m.component.position,
                     shield_life: m.component.shield_life,
-                    is_controlled: m.component.is_controlled,
+                    is_controlled: m.component.is_controlled(),
                     health: m.health,
                     v: m.component.velocity,
                     threat_state: MonsterThreatState::NotThreat,
