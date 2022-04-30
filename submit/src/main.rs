@@ -1145,25 +1145,36 @@ impl Solver {
             }
         }
 
-        let mut ret = self
-            .hero_state
-            .iter_mut()
-            .flat_map(|group_state| -> Vec<(usize, Action)> {
-                match &mut group_state.hero_state {
-                    HeroState::CollectMana(info) => {
-                        vec![(
-                            group_state.hero_list[0],
-                            info.action(board, group_state.hero_list[0], &mut self.solver_state),
-                        )]
-                    }
-                    HeroState::Attacker(info) => info.action(board, &group_state.hero_list, &mut self.solver_state),
-                    HeroState::Defender(info) => vec![(
-                        group_state.hero_list[0],
-                        info.action(board, group_state.hero_list[0], &mut self.solver_state),
-                    )],
+        let mut ret = vec![
+            Action::Wait {
+                message: "empty".to_string()
+            };
+            3
+        ];
+
+        for group_id in 0..self.hero_state.len() {
+            let action_list = match &mut self.hero_state[group_id] {
+                HeroGroupState {
+                    hero_list,
+                    hero_state: HeroState::CollectMana(info),
+                } => {
+                    vec![(hero_list[0], info.action(board, hero_list[0], &mut self.solver_state))]
                 }
-            })
-            .collect::<Vec<_>>();
+                HeroGroupState {
+                    hero_list,
+                    hero_state: HeroState::Attacker(info),
+                } => info.action(board, &hero_list, &mut self.solver_state),
+                HeroGroupState {
+                    hero_list,
+                    hero_state: HeroState::Defender(info),
+                } => {
+                    vec![(hero_list[0], info.action(board, hero_list[0], &mut self.solver_state))]
+                }
+            };
+            for (hero_id, action) in action_list.into_iter() {
+                ret[hero_id] = action;
+            }
+        }
 
         // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
         if !self.solver_state.strategy_changed && board.player.mana >= 200
@@ -1187,9 +1198,7 @@ impl Solver {
         for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
             self.solver_state.previous_position[hero_id] = hero.pos;
         }
-
-        ret.sort_by_key(|e| e.0);
-        ret.into_iter().map(|e| e.1).collect()
+        ret
     }
 }
 
