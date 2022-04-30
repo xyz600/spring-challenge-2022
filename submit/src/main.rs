@@ -675,7 +675,7 @@ impl AttackerAttractMonsterInfo {
         AttackerAttractMonsterInfo {
             // 勧誘する場所
             center: IPoint {
-                x: MAX_X - 6700,
+                x: MAX_X - 6000,
                 y: MAX_Y - 1000,
             },
             counter: 0,
@@ -687,7 +687,6 @@ impl AttackerAttractMonsterInfo {
 #[derive(Clone)]
 struct AttackerInfo {
     home: [IPoint; 2],
-    double_wind_target: Option<i32>,
     go_home: bool,
     counter: i32,
 }
@@ -705,7 +704,6 @@ impl AttackerInfo {
                     y: MAX_Y - 1000,
                 },
             ],
-            double_wind_target: None,
             go_home: false,
             counter: 0,
         }
@@ -818,27 +816,32 @@ impl AttackerInfo {
         // 3. 1手以内で double wind attack の1段目まで持っていける場合は、そのように移動
         // monster を一通り見て、1手先の場所で double wind できそうならそこに移動して強制終了する
         if !decided {
-            for m in board.monster_list.iter() {
-                let np = m.next_pos();
-                let expected_h0 = np + IPoint { x: 1100, y: 0 };
-                let expected_h1 = expected_h0 + IPoint { x: 600, y: 0 };
+            for turn in 1..4 {
+                if decided {
+                    continue;
+                }
+                for m in board.monster_list.iter() {
+                    let np = m.pos + m.v * turn;
+                    let expected_h0 = np + IPoint { x: 1100, y: 0 };
+                    let expected_h1 = expected_h0 + IPoint { x: 600, y: 0 };
 
-                if np.in_range(&board.player.base, FIRST_WIND_ATTACK_THREASHOLD)
-                    && expected_h0.in_range(&hero0.pos, MAX_PLAYER_VELOCITY)
-                    && expected_h1.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * 2)
-                {
-                    eprintln!("[at3] np = {:?}", np);
-                    decided = true;
-                    self.counter = 0;
-                    self.go_home = false;
-                    ret[0] = Action::Move {
-                        point: expected_h0,
-                        message: format!("[at3] move"),
-                    };
-                    ret[1] = Action::Move {
-                        point: expected_h1,
-                        message: format!("[at3] move"),
-                    };
+                    if np.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
+                        && expected_h0.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
+                        && expected_h1.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 1))
+                    {
+                        eprintln!("[at3] np = {:?}", np);
+                        decided = true;
+                        self.counter = 0;
+                        self.go_home = false;
+                        ret[0] = Action::Move {
+                            point: expected_h0,
+                            message: format!("[at3] move"),
+                        };
+                        ret[1] = Action::Move {
+                            point: expected_h1,
+                            message: format!("[at3] move"),
+                        };
+                    }
                 }
             }
         }
@@ -846,72 +849,78 @@ impl AttackerInfo {
         // 4. 2手で double wind attack の1段目まで持っていける(うち初手は control)場合は、control
         // 2手先を読んで、double wind できそうなら control する
         if !decided {
-            for m in board.monster_list.iter() {
-                // 2手目は control で rad でどこに飛ばせばいいかは全探索
-                for rad in 0..360 {
-                    let rad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
-                    let dir = (FPoint {
-                        x: rad.cos(),
-                        y: rad.sin(),
-                    } * (MAX_MONSTER_VELOCITY as f64))
-                        .to::<i32>();
-                    let nnp = m.next_pos() + dir;
-                    let expected_hero0_pos = nnp + IPoint { x: 1100, y: 0 };
-                    let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
-
-                    if board.player.mana >= 50
-                        && hero0.pos.in_range(&m.pos, CONTROL_RADIUS)
-                        && nnp.in_range(&board.player.base, FIRST_WIND_ATTACK_THREASHOLD)
-                        && expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY)
-                        && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * 3)
-                        && m.health > 10
-                    {
-                        decided = true;
-                        self.double_wind_target = Some(m.id);
-                        eprintln!("[at4] target: {:?}", nnp);
-                        ret[0] = Action::Control {
-                            entity_id: m.id,
-                            point: nnp,
-                            message: format!("[at4] control monster"),
-                        };
-                        ret[1] = Action::Move {
-                            point: expected_hero1_pos,
-                            message: format!("[at4] move"),
-                        };
+            for turn in 1..4 {
+                if decided {
+                    break;
+                }
+                for m in board.monster_list.iter() {
+                    if decided {
                         break;
+                    }
+                    // 2手目は control で rad でどこに飛ばせばいいかは全探索
+                    for rad in 0..360 {
+                        if decided {
+                            break;
+                        }
+                        let rad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
+                        let dir = (FPoint {
+                            x: rad.cos(),
+                            y: rad.sin(),
+                        } * (MAX_MONSTER_VELOCITY as f64))
+                            .to::<i32>();
+                        let nnp = m.next_pos() + dir * turn;
+                        let expected_hero0_pos = nnp + IPoint { x: 1100, y: 0 };
+                        let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
+
+                        if board.player.mana >= 50
+                            && hero0.pos.in_range(&m.pos, CONTROL_RADIUS)
+                            && nnp.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
+                            && expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
+                            && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 2))
+                            && m.health > 10
+                        {
+                            decided = true;
+                            eprintln!("[at4] target: {:?}", nnp);
+                            ret[0] = Action::Control {
+                                entity_id: m.id,
+                                point: nnp,
+                                message: format!("[at4] control monster"),
+                            };
+                            ret[1] = Action::Move {
+                                point: expected_hero1_pos,
+                                message: format!("[at4] move"),
+                            };
+                            break;
+                        }
                     }
                 }
             }
         }
 
-        // 5. 家に帰っていない場合はそれを優先
-        if !decided && !self.go_home {
-            eprintln!("[at5] go home");
-            // 一旦家まで帰るのを優先
-            decided = true;
-        }
+        if !decided {
+            if !self.go_home {
+                // 5. 家に帰っていない場合はそれを優先
+                eprintln!("[at5] go home");
+            } else {
+                // 6. 難しそうならランダムっぽく動いて待つ
+                eprintln!("[at6] random walk");
+                self.counter += 1;
+                let rad = (self.counter * 240) as f64 / 360.0 * std::f64::consts::PI * 2.0;
+                let dx = (MAX_PLAYER_VELOCITY as f64 * rad.cos()) as i32;
+                let dy = (MAX_PLAYER_VELOCITY as f64 * rad.sin()) as i32;
+                let np = hero0.pos + IPoint { x: dx, y: dy };
 
-        // 6. 難しそうならランダムっぽく動いて待つ
+                ret[0] = Action::Move {
+                    point: np,
+                    message: format!("[at6] random move"),
+                };
 
-        // 適当に歩いて探す
-        if !decided && self.go_home && self.double_wind_target.is_none() {
-            eprintln!("[at6] random walk");
-            self.counter += 1;
-            let rad = (self.counter * 240) as f64 / 360.0 * std::f64::consts::PI * 2.0;
-            let dx = (MAX_PLAYER_VELOCITY as f64 * rad.cos()) as i32;
-            let dy = (MAX_PLAYER_VELOCITY as f64 * rad.sin()) as i32;
-            let np = hero0.pos + IPoint { x: dx, y: dy };
-
-            ret[0] = Action::Move {
-                point: np,
-                message: format!("[at6] random move"),
-            };
-
-            let hero1_pos = np + IPoint { x: 600, y: 0 };
-            ret[1] = Action::Move {
-                point: hero1_pos,
-                message: format!("[at6] random move"),
-            };
+                let hero1_pos = np + IPoint { x: 600, y: 0 };
+                ret[1] = Action::Move {
+                    point: hero1_pos,
+                    message: format!("[at6] random move"),
+                };
+            }
         }
 
         ret.into_iter().enumerate().collect::<Vec<_>>()
@@ -944,6 +953,82 @@ impl AttackerInfo {
             Some(best_pos)
         } else {
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        FPoint, Hero, IPoint, Monster, CONTROL_RADIUS, FIRST_WIND_ATTACK_THREASHOLD, MAX_MONSTER_VELOCITY,
+        MAX_PLAYER_VELOCITY,
+    };
+
+    #[test]
+    fn test_rad() {
+        let m = Monster {
+            id: 0,
+            pos: IPoint { x: 10855, y: 6921 },
+            shield_life: 0,
+            is_controlled: false,
+            health: 19,
+            v: IPoint { x: 386, y: 102 },
+            threat_state: crate::MonsterThreatState::NotThreat,
+        };
+        let hero0 = Hero {
+            id: 0,
+            pos: IPoint { x: 11245, y: 8000 },
+            shield_life: 0,
+            is_controlled: false,
+        };
+        let hero1 = Hero {
+            id: 0,
+            pos: IPoint { x: 11845, y: 8000 },
+            shield_life: 0,
+            is_controlled: false,
+        };
+
+        for turn in 1..4 {
+            let mut best_eval = 100000000;
+            let mut best_rad = 0;
+            let mut best_h0 = 0;
+            let mut best_h1 = 0;
+            for rad in 0..360 {
+                let frad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
+                let dir = (FPoint {
+                    x: frad.cos(),
+                    y: frad.sin(),
+                } * (MAX_MONSTER_VELOCITY as f64))
+                    .to::<i32>();
+                let nnp = m.next_pos() + dir * turn;
+
+                let expected_hero0_pos = nnp + IPoint { x: 1100, y: 0 };
+                let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
+
+                if !hero0.pos.in_range(&m.pos, CONTROL_RADIUS)
+                    || !expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
+                    || !expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 2))
+                    || m.health <= 10
+                {
+                    continue;
+                }
+
+                let eval = expected_hero0_pos.distance(&hero0.pos) + expected_hero1_pos.distance(&hero1.pos);
+                if eval < best_eval {
+                    best_eval = eval;
+                    best_rad = rad;
+                    best_h0 = expected_hero0_pos.distance(&hero0.pos);
+                    best_h1 = expected_hero1_pos.distance(&hero1.pos);
+                }
+            }
+            eprintln!("turn = {}", turn);
+            eprintln!("eval = {}, rad = {}, ", best_eval, best_rad);
+            eprintln!("h0 = {}, h1 = {}, ", best_h0, best_h1);
+            // && nnp.in_range(&board.player.base, FIRST_WIND_ATTACK_THREASHOLD)
+            // && expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
+            // && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 2))
+            // && m.health > 10
+            eprintln!("----");
         }
     }
 }
@@ -1182,6 +1267,22 @@ impl Solver {
             }
         }
 
+        eprintln!("monster: ");
+        for m in board.monster_list.iter() {
+            eprintln!(
+                "id: {}, pos: {:?}, v: {:?} dist base: {}, dh0: {}, dh1: {}",
+                m.id,
+                m.pos,
+                m.v,
+                board.opponent.base.distance(&m.pos),
+                board.player.hero_list[0].pos.distance(&m.pos),
+                board.player.hero_list[1].pos.distance(&m.pos)
+            );
+        }
+        eprintln!("hero: ");
+        for h in board.player.hero_list.iter() {
+            eprintln!("id: {}, pos: {:?}", h.id, h.pos,);
+        }
         self.solver_state.spell_count = 0;
 
         for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
@@ -1225,7 +1326,7 @@ impl Solver {
         }
 
         // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
-        if !self.solver_state.strategy_changed && board.player.mana >= 120 {
+        if !self.solver_state.strategy_changed && board.player.mana >= 150 {
             self.solver_state.strategy_changed = true;
             // 防御だけ残しておく
             self.hero_state.retain(|g| g.hero_list[0] == 2);
