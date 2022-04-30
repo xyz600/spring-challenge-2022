@@ -369,7 +369,8 @@ impl CollectManaInfo {
                         point,
                         message: format!("[m1]wind"),
                     }
-                } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller {
+                } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller[hero_id]
+                {
                     solver.spell_count += 1;
                     return Action::Shield {
                         entity_id: hero.id,
@@ -404,7 +405,7 @@ impl CollectManaInfo {
             let point = self.home;
             let candidate = self.enumerate_multiple_hit(board, hero_id);
 
-            if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller {
+            if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
                 solver.spell_count += 1;
                 return Action::Shield {
                     entity_id: hero.id,
@@ -575,7 +576,7 @@ impl AttackerInfo {
             self.idle_counter = 0;
         }
 
-        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller {
+        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
             solver.spell_count += 1;
             Action::Shield {
                 entity_id: hero.id,
@@ -717,7 +718,7 @@ impl MidFielderInfo {
     fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
         let hero = &board.player.hero_list[hero_id];
 
-        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller {
+        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
             // 敵が邪魔をしてくるやつで、シールドが切れたら張り直す
             solver.spell_count += 1;
             Action::Shield {
@@ -833,7 +834,7 @@ impl DefenderInfo {
                     point,
                     message: format!("[def]wind"),
                 }
-            } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller {
+            } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller[hero_id] {
                 solver.spell_count += 1;
                 Action::Shield {
                     entity_id: hero.id,
@@ -931,7 +932,7 @@ enum OpponentStrategyType {
 #[derive(Clone, Debug)]
 struct SolverState {
     // 相手が自分の hero に対して一度でも妨害呪文をかけてきたか
-    is_opponent_speller: bool,
+    is_opponent_speller: [bool; 3],
     spell_count: i32,
     // mid fielder が何回 control したか
     // これを見て attacker が妨害工作をするタイミングを決める
@@ -980,7 +981,7 @@ impl Solver {
                 .map(|hero_id| HeroState::CollectMana(CollectManaInfo::new(base_pos, hero_id)))
                 .collect::<Vec<_>>(),
             solver_state: SolverState {
-                is_opponent_speller: false,
+                is_opponent_speller: [false; 3],
                 spell_count: 0,
                 midfielder_countrol_count: 0,
                 strategy_changed: false,
@@ -1012,9 +1013,9 @@ impl Solver {
 
         self.solver_state.spell_count = 0;
 
-        for hero in board.player.hero_list.iter() {
+        for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
             if hero.is_controlled {
-                self.solver_state.is_opponent_speller = true;
+                self.solver_state.is_opponent_speller[hero_id] = true;
             }
         }
 

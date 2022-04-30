@@ -237,7 +237,7 @@ impl epi::App for TemplateApp {
                                 label!(ui, "Velocity", hero.component.velocity);
                                 label!(ui, "Id", hero.component.id);
                                 label!(ui, "Shield_life", hero.component.shield_life);
-                                label!(ui, "IsControled", hero.component.is_controlled);
+                                label!(ui, "IsControled", hero.component.is_controlled());
                             });
                     }
                 });
@@ -256,7 +256,7 @@ impl epi::App for TemplateApp {
                                 label!(ui, "Velocity", monster.component.velocity);
                                 label!(ui, "Id", monster.component.id);
                                 label!(ui, "Shield_life", monster.component.shield_life);
-                                label!(ui, "IsControled", monster.component.is_controlled);
+                                label!(ui, "IsControled", monster.component.is_controlled());
                             });
                     }
                 });

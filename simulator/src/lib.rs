@@ -738,7 +738,7 @@ impl Component {
         self.position + self.velocity
     }
 
-    fn is_controlled(&self) -> bool {
+    pub fn is_controlled(&self) -> bool {
         !self.control_move_target.is_empty()
     }
 }
@@ -908,6 +908,7 @@ pub const VISIBLE_RADIUS_FROM_BASE: i32 = 6000;
 pub const VISIBLE_RADIUS_FROM_HERO: i32 = 2200;
 pub const MOB_SPAWN_MAX_DIRECTION_DELTA: f64 = 5.0 * std::f64::consts::PI / 12.0;
 
+#[derive(Clone, Copy)]
 struct ManaInfo {
     wild_mana: i32,
     all_mana: i32,
@@ -1360,10 +1361,8 @@ impl Simulator {
                         .control_move_target
                         .iter()
                         .map(|p| Self::calculate_real_target(&m.component.position, &p, MAX_MONSTER_VELOCITY))
-                        .fold(Point::new(), |l, r| l + r) / m.component.control_move_target.len() as i32;
-                    let np =
-                    if Self::go_outside_around_base(&m.component.position, np)
-
+                        .fold(Point::new(), |l, r| l + r)
+                        / m.component.control_move_target.len() as i32;
                 } else {
                     // 2. そうでなければ、設定された velocity を基に動く
                     m.component.position = m.component.next_pos();
