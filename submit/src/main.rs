@@ -791,11 +791,12 @@ impl AttackerInfo {
             .monster_list
             .iter()
             .filter(|m| {
-                m.pos.in_range(&hero0.pos, WIND_RADIUS)
+                m.health > 6
+                    && m.pos.in_range(&hero0.pos, WIND_RADIUS)
                     && m.pos.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
             })
             .collect::<Vec<_>>();
-        if !decided && !target.is_empty() && board.player.mana >= 40 {
+        if !decided && !target.is_empty() && board.player.mana >= 30 {
             if let Some((point, h1_point)) = self.decide_wind_target(&board, &target, hero0, hero1) {
                 decided = true;
                 eprintln!("[at2] p = {:?}", target[0]);
@@ -1240,7 +1241,7 @@ const VELOCITY_DIFF: i32 = MAX_PLAYER_VELOCITY - MAX_MONSTER_VELOCITY;
 const ATTACK_HIT_RADIUS: i32 = 800;
 const HERO_RECOGNIZABLE_RADIUS: i32 = 2200;
 const WIND_DISTANCE: i32 = 2200;
-const WIND_ATTACK_MARGIN: i32 = 400;
+const WIND_ATTACK_MARGIN: i32 = 0;
 const FIRST_WIND_ATTACK_THREASHOLD: i32 = THREASHOLD_BASE_DAMAGE_RADIUS + 3 * WIND_DISTANCE + WIND_ATTACK_MARGIN;
 const SECOND_WIND_ATTACK_THREASHOLD: i32 = THREASHOLD_BASE_DAMAGE_RADIUS + 2 * WIND_DISTANCE + WIND_ATTACK_MARGIN;
 
@@ -1334,7 +1335,7 @@ impl Solver {
         }
 
         // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
-        if !self.solver_state.strategy_changed && board.player.mana >= 150 {
+        if !self.solver_state.strategy_changed && board.player.mana >= 200 {
             self.solver_state.strategy_changed = true;
             // 防御だけ残しておく
             self.hero_state.retain(|g| g.hero_list[0] == 2);
