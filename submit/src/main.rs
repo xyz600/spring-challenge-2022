@@ -450,6 +450,19 @@ impl Monster {
     fn next_pos(&self) -> IPoint {
         self.pos + self.v
     }
+
+    fn will_dead(&self, board: &Board) -> bool {
+        let damage = board
+            .player
+            .hero_list
+            .iter()
+            .chain(board.opponent.hero_list.iter())
+            .filter(|h| h.pos.in_range(&self.pos, ATTACK_HIT_RADIUS))
+            .count() as i32
+            * PLAYER_DAMAGE;
+
+        damage >= self.health
+    }
 }
 
 #[derive(Clone)]
@@ -650,24 +663,32 @@ impl CollectManaInfo {
 }
 
 #[derive(Clone)]
-struct AttackerGoHomeInfo {
+struct AttackerAttractMonsterInfo {
     controlled_monster_id: HashSet<i32>,
-    first: bool,
+    center: IPoint,
+    counter: i32,
+    go_home: bool,
 }
 
-impl AttackerGoHomeInfo {
-    fn new() -> AttackerGoHomeInfo {
+impl AttackerAttractMonsterInfo {
+    fn new() -> AttackerAttractMonsterInfo {
         eprintln!("create gohome info");
-        AttackerGoHomeInfo {
+        AttackerAttractMonsterInfo {
             controlled_monster_id: HashSet::new(),
-            first: true,
+            // 勧誘する場所
+            center: IPoint {
+                x: MAX_X - 7700,
+                y: MAX_Y - 1000,
+            },
+            counter: 0,
+            go_home: false,
         }
     }
 }
 
 #[derive(Clone)]
 enum AttackerInnerState {
-    GoHome(AttackerGoHomeInfo),
+    AttractMonster(AttackerAttractMonsterInfo),
     Attack,
 }
 
@@ -675,6 +696,8 @@ enum AttackerInnerState {
 struct AttackerInfo {
     home: [IPoint; 2],
     inner_state: AttackerInnerState,
+    double_wind_target: HashSet<i32>,
+    emergency_attack: bool,
 }
 
 impl AttackerInfo {
@@ -682,15 +705,17 @@ impl AttackerInfo {
         AttackerInfo {
             home: [
                 IPoint {
-                    x: MAX_X - 5000,
+                    x: MAX_X - 5700,
                     y: MAX_Y - 1000,
                 },
                 IPoint {
-                    x: MAX_X - 5000,
-                    y: MAX_Y - 2000,
+                    x: MAX_X - 4700,
+                    y: MAX_Y - 1000,
                 },
             ],
-            inner_state: AttackerInnerState::GoHome(AttackerGoHomeInfo::new()),
+            inner_state: AttackerInnerState::AttractMonster(AttackerAttractMonsterInfo::new()),
+            double_wind_target: HashSet::new(),
+            emergency_attack: false,
         }
     }
 
@@ -701,50 +726,171 @@ impl AttackerInfo {
         //   - ソロのドリブルを相手が止める手段があるか否かを判定
 
         let ret = match &mut self.inner_state {
-            AttackerInnerState::GoHome(info) => {
-                // 所定の位置に移動する
-                let mut ret = vec![];
-                for hero_id in hero_list.iter() {
-                    let hero = &board.player.hero_list[*hero_id];
-                    let action = if info.first {
-                        eprintln!("info first...");
-                        // control で誘導する方が見つけるより簡単なので、1手戻って見つけやすくする
-                        Action::Move {
-                            point: board.player.base,
-                            message: format!("[at]go rev home"),
+            AttackerInnerState::AttractMonster(info) => {
+                let mut ret = vec![
+                    Action::Move {
+                        point: info.center,
+                        message: format!("go home"),
+                    },
+                    Action::Move {
+                        point: info.center + IPoint { x: 600, y: 0 },
+                        message: format!("go home"),
+                    },
+                ];
+                let mut decided = false;
+
+                let hero0 = &board.player.hero_list[0];
+                let hero1 = &board.player.hero_list[1];
+
+                // home に着いたら 勧誘開始
+                if hero0.pos.distance2(&info.center) == 0 {
+                    info.go_home = true;
+                }
+
+                if !info.go_home {
+                    // 一旦家まで帰るのを優先
+                    decided = true;
+                }
+
+                // monster を一通り見て、1手先の場所で double wind できそうならそこに移動して強制終了する
+                if !decided {
+                    for m in board.monster_list.iter() {
+                        let np = m.next_pos();
+                        let expected_h0 = np + IPoint { x: 1100, y: 0 };
+                        let expected_h1 = np + IPoint { x: 2200, y: 0 };
+
+                        if expected_h0.in_range(&hero0.pos, MAX_PLAYER_VELOCITY)
+                            && expected_h1.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * 2)
+                        {
+                            self.emergency_attack = true;
+                            decided = true;
+                            self.double_wind_target.insert(m.id);
+                            ret[0] = Action::Move {
+                                point: expected_h0,
+                                message: format!("[st] move"),
+                            };
+                            ret[1] = Action::Move {
+                                point: expected_h1,
+                                message: format!("[st] move"),
+                            };
                         }
-                    } else if let Some(m) = board
-                        .monster_list
-                        .iter()
-                        .filter(|m| {
-                            m.pos.in_range(&hero.pos, CONTROL_RADIUS)
-                                && !info.controlled_monster_id.contains(&m.id)
-                                && hero.pos.distance2(&board.opponent.base) < m.pos.distance2(&board.opponent.base)
-                        })
-                        .next()
-                    {
-                        // 移動するついでに monster を見かけたら、hero[0] の home に向けて control しておく
-                        info.controlled_monster_id.insert(m.id);
-                        Action::Control {
-                            entity_id: m.id,
-                            point: self.home[0],
-                            message: format!("[at]contorl for future"),
-                        }
-                    } else {
-                        Action::Move {
-                            point: self.home[*hero_id],
-                            message: format!("[at]go home"),
-                        }
+                    }
+                }
+                // FIXME: 実装
+
+                // 適当に歩いて探す
+                if !decided && info.go_home && info.controlled_monster_id.len() < 2 {
+                    info.counter += 1;
+                    let rad = (info.counter * 240) as f64 / 360.0 * std::f64::consts::PI;
+                    let dx = (MAX_PLAYER_VELOCITY as f64 * rad.cos()) as i32;
+                    let dy = (MAX_PLAYER_VELOCITY as f64 * rad.sin()) as i32;
+                    let np = hero0.pos + IPoint { x: dx, y: dy };
+                    ret[0] = Action::Move {
+                        point: np,
+                        message: format!("random move"),
                     };
-                    ret.push((*hero_id, action));
+
+                    let hero1_pos = hero0.pos + IPoint { x: 600, y: 0 };
+                    ret[0] = Action::Move {
+                        point: hero1_pos,
+                        message: format!("random move"),
+                    };
                 }
-                if info.first {
-                    eprintln!("set first false");
-                    info.first = false;
-                }
-                ret
+
+                ret.into_iter().enumerate().collect()
             }
             AttackerInnerState::Attack => {
+                let hero0 = &board.player.hero_list[hero_list[0]];
+                let hero1 = &board.player.hero_list[hero_list[1]];
+
+                let mut ret = vec![
+                    Action::Move {
+                        point: self.home[0],
+                        message: "at[0] go home".to_string(),
+                    },
+                    Action::Move {
+                        point: self.home[1],
+                        message: "at[0] go home".to_string(),
+                    },
+                ];
+                let mut decided = false;
+
+                // base からの距離が 4700 未満で、両方の hero が打てるなら、double wind
+                let wind_target = board
+                    .monster_list
+                    .iter()
+                    .filter(|m| {
+                        m.pos.in_range(&board.opponent.base, 4700)
+                            && m.pos.in_range(&hero0.pos, WIND_RADIUS)
+                            && m.pos.in_range(&hero1.pos, WIND_RADIUS)
+                            && !m.will_dead(board)
+                    })
+                    .collect::<Vec<_>>();
+
+                if board.player.mana >= 30 && !wind_target.is_empty() {
+                    decided = true;
+                    // hero0 も hero1 も WIND できるなら Double Wind !!
+                    let dir = board.opponent.base - wind_target[0].pos;
+                    ret[0] = Action::Wind {
+                        point: hero0.pos + dir,
+                        message: format!("[at1] Double Wind!!"),
+                    };
+                    ret[1] = Action::Wind {
+                        point: hero1.pos + dir,
+                        message: format!("[at1] Double Wind!!"),
+                    };
+                }
+
+                // base からの距離が 6900 未満で、次に base からの距離が 4700 未満かつ両方の hero が打てる位置に置ける場合、single wind
+                let target = board
+                    .monster_list
+                    .iter()
+                    .filter(|m| m.pos.in_range(&hero0.pos, WIND_RADIUS) && m.pos.in_range(&board.opponent.base, 6900))
+                    .collect::<Vec<_>>();
+                if !decided && !target.is_empty() {
+                    if let Some(point) = self.decide_wind_target(&board, &target, hero0, hero1) {
+                        decided = true;
+                        // hero 0 は WIND する target を決定
+                        ret[0] = Action::Wind {
+                            point,
+                            message: format!("[at2] wind for dw"),
+                        };
+                        // hero 1 は 次の WIND に備えて位置取り
+                        ret[1] = Action::Move {
+                            point,
+                            message: format!("[at2] move for dw"),
+                        }
+                    }
+                }
+
+                // 周囲の monster の1手先の行先に、double wind の1手目がぴったり合わせられるなら、移動する
+                for m in board.monster_list.iter() {
+                    let np = m.next_pos();
+                    if !decided && np.in_range(&board.opponent.base, 6900) {
+                        let expected_hero0_pos = np + IPoint { x: 1150, y: 0 };
+                        let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
+                        if expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY)
+                            && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * 2)
+                        {
+                            decided = true;
+                            // hero 1 は 次の WIND に備えて位置取り
+                            ret[0] = Action::Move {
+                                point: expected_hero0_pos,
+                                message: format!("[at3] move for dw"),
+                            };
+                            // hero 1 は 次の WIND に備えて位置取り
+                            ret[1] = Action::Move {
+                                point: expected_hero1_pos,
+                                message: format!("[at3] move for dw"),
+                            };
+                        }
+                    }
+                }
+
+                // } else {
+                //     // hero 0 が monster を探す旅に出て、 control
+                // }
+
                 // - 以下の行動列が敵に邪魔されうるか否かを判定したい
                 //   - 味方 hero 1 が前方に monster を打つ
                 //   - 味方 hero 2 が所定の場所に (move / wind / control)
@@ -765,35 +911,64 @@ impl AttackerInfo {
                 //     - 1手目の hero の WIND 圏外にいる
                 // - 探索アルゴリズム
                 //
-                vec![
-                    (
-                        0,
-                        Action::Move {
-                            point: self.home[0],
-                            message: format!("go home"),
-                        },
-                    ),
-                    (
-                        1,
-                        Action::Move {
-                            point: self.home[1],
-                            message: format!("go home"),
-                        },
-                    ),
-                ]
+
+                ret.into_iter().enumerate().collect::<Vec<_>>()
             }
         };
 
-        if let AttackerInnerState::GoHome(_) = self.inner_state {
-            if hero_list
-                .iter()
-                .all(|hero_id| self.home[*hero_id].distance2(&board.player.hero_list[*hero_id].pos) == 0)
-            {
-                self.inner_state = AttackerInnerState::Attack;
+        match &self.inner_state {
+            AttackerInnerState::AttractMonster(info) => {
+                if info.controlled_monster_id.len() >= 2 {
+                    for m in info.controlled_monster_id.iter() {
+                        self.double_wind_target.insert(*m);
+                    }
+                    self.inner_state = AttackerInnerState::Attack;
+                }
+            }
+            AttackerInnerState::Attack => {
+                if self
+                    .double_wind_target
+                    .iter()
+                    .all(|m_id| !board.monster_list.iter().all(|m| m.id != *m_id))
+                {
+                    self.emergency_attack = false;
+                    self.double_wind_target.clear();
+                    self.inner_state = AttackerInnerState::AttractMonster(AttackerAttractMonsterInfo::new());
+                }
             }
         }
 
         ret
+    }
+
+    fn decide_wind_target(&self, board: &Board, monster: &Vec<&Monster>, hero0: &Hero, hero1: &Hero) -> Option<IPoint> {
+        let mut best_pos = IPoint::new();
+        let mut best_eval = 0;
+        // 1°刻みで実際に飛ばして、よさそうな場所を採用
+        for rad in 0..360 {
+            let rad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
+            let x = (rad.cos() * WIND_DISTANCE as f64).round() as i32;
+            let y = (rad.sin() * WIND_DISTANCE as f64).round() as i32;
+            let diff = IPoint { x, y };
+            let eval = monster
+                .iter()
+                .filter(|m| {
+                    let np = m.pos + diff;
+                    np.in_range(&hero0.pos, WIND_RADIUS)
+                        && np.in_range(&hero1.pos, WIND_RADIUS)
+                        && np.in_range(&board.opponent.base, 4700)
+                })
+                .count();
+            if eval > best_eval {
+                best_eval = eval;
+                best_pos = hero0.pos + diff;
+            }
+        }
+        if best_eval > 0 {
+            Some(best_pos)
+        } else {
+            None
+        }
     }
 }
 
@@ -1085,9 +1260,7 @@ impl Solver {
         }
 
         // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
-        if !self.solver_state.strategy_changed
-            && (board.player.mana >= 200 || (board.player.mana - board.opponent.mana >= 100))
-        {
+        if !self.solver_state.strategy_changed && board.player.mana >= 150 {
             self.solver_state.strategy_changed = true;
             // 防御だけ残しておく
             self.hero_state.retain(|g| g.hero_list[0] == 2);
