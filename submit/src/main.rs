@@ -728,174 +728,150 @@ impl CollectManaInfo {
     }
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(Clone)]
+struct AttackerGoHomeInfo {
+    controlled_monster_id: HashSet<i32>,
+}
+
+impl AttackerGoHomeInfo {
+    fn new() -> AttackerGoHomeInfo {
+        AttackerGoHomeInfo {
+            controlled_monster_id: HashSet::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum AttackerInnerState {
+    GoHome(AttackerGoHomeInfo),
+    Attack,
+}
+
+#[derive(Clone)]
 struct AttackerInfo {
-    home: IPoint,
+    home: [IPoint; 2],
     idle_counter: usize,
     home_shifted: bool,
+    inner_state: AttackerInnerState,
 }
 
 impl AttackerInfo {
     fn new() -> AttackerInfo {
         AttackerInfo {
-            home: IPoint {
-                x: MAX_X - 2000,
-                y: MAX_Y - 2000,
-            },
+            home: [
+                IPoint {
+                    x: MAX_X - 5000,
+                    y: MAX_Y - 1000,
+                },
+                IPoint {
+                    x: MAX_X - 5000,
+                    y: MAX_Y - 2000,
+                },
+            ],
             idle_counter: 0,
             home_shifted: false,
+            inner_state: AttackerInnerState::GoHome(AttackerGoHomeInfo::new()),
         }
     }
 
     fn action(&mut self, board: &Board, hero_list: &Vec<usize>, solver: &mut SolverState) -> Vec<(usize, Action)> {
-        let action_list = hero_list
-            .iter()
-            .map(|&hero_id| -> Action {
-                let hero = &board.player.hero_list[hero_id];
+        // FIXME: 実装
+        // - 速攻が成立するかを判定したい
+        //   - 3人の hero の所在がすべて見えている
+        //   - ソロのドリブルを相手が止める手段があるか否かを判定
 
-                // home にしばらく居座っていたら、手前で防御されている可能性が高いので、home を少し上にずらす
-                if !self.home_shifted && self.home == hero.pos {
-                    self.idle_counter += 1;
-
-                    if self.idle_counter == 10 {
-                        self.home_shifted = true;
-                        self.home.x -= 1000;
-                        self.home.y -= 1000;
-                    }
-                } else {
-                    self.idle_counter = 0;
-                }
-
-                if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
-                    solver.spell_count += 1;
-                    Action::Shield {
-                        entity_id: hero.id,
-                        message: format!("[at]shield self!"),
-                    }
-                } else if self.home.distance(&hero.pos) > 4000 {
-                    Action::Move {
-                        point: self.home,
-                        message: format!("[at]home 1"),
-                    }
-                } else if board
-                    .opponent
-                    .hero_list
-                    .iter()
-                    .filter(|op_h| {
-                        op_h.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS + 1000
-                    && op_h.shield_life == 0
-                    && board
+        let ret = match &mut self.inner_state {
+            AttackerInnerState::GoHome(info) => {
+                // 所定の位置に移動する
+                // 移動するついでに monster を見かけたら、hero[0] の home に向けて control しておく
+                let mut ret = vec![];
+                for hero_id in hero_list.iter() {
+                    let hero = &board.player.hero_list[*hero_id];
+                    if let Some(m) = board
                         .monster_list
                         .iter()
-                        .map(|m| m.pos.distance(&board.opponent.base))
-                        .min()
-                        .unwrap_or(std::i32::MAX)
-                        < op_h.pos.distance(&board.opponent.base) // 敵 hero より内側に monster が居座っている
-                    && board
-                        .monster_list
-                        .iter()
-                        .filter(|m| m.threat_state.threat_opponent() && m.health >= 6)
-                        .count()
-                        > 0
-                    })
-                    .count()
-                    > 0
-                {
-                    // 相手陣地に十分な monster がいるので、妨害が最善
-                    // 相手陣地付近にいる 敵 hero を遠ざけ続ける
-                    let op_hero = board
-                        .opponent
-                        .hero_list
-                        .iter()
-                        .filter(|op_h| op_h.shield_life == 0)
-                        .min_by_key(|op_h| op_h.pos.distance(&board.opponent.base))
-                        .unwrap();
-                    if op_hero.pos.distance(&hero.pos) <= CONTROL_RADIUS && solver.can_spell(board, false) {
-                        solver.spell_count += 1;
-                        Action::Control {
-                            entity_id: op_hero.id,
-                            point: op_hero.pos * 2 - board.opponent.base,
-                            message: format!("[at]op control"),
-                        }
-                    } else {
-                        Action::Move {
-                            point: op_hero.pos,
-                            message: format!("[at]op_h shortest"),
-                        }
-                    }
-                } else if let Some(monster) = board
-                    .monster_list
-                    .iter()
-                    .filter(|m| {
-                        m.shield_life == 0
-                            && m.threat_state.threat_opponent()
-                            && m.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS
-                    })
-                    .min_by_key(|m| hero.pos.distance(&m.pos))
-                {
-                    // 相手ゴール前ががら空き
-                    if board
-                        .opponent
-                        .hero_list
-                        .iter()
-                        .filter(|h| h.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS)
-                        .count()
-                        == 0
+                        .filter(|m| {
+                            m.pos.in_range(&hero.pos, CONTROL_RADIUS)
+                                && !info.controlled_monster_id.contains(&m.id)
+                                && hero.pos.distance2(&board.opponent.base) < m.pos.distance2(&board.opponent.base)
+                        })
+                        .next()
                     {
-                        if hero.pos.distance(&monster.pos) <= WIND_RADIUS && solver.can_spell(board, false) {
-                            // wind の方が到達速度が速そう
-                            solver.spell_count += 1;
-                            Action::Shield {
-                                entity_id: monster.id,
-                                message: format!("[at]shield"),
-                            }
-                        } else {
-                            let (_, point) = self.shortest_move(&monster, &hero.pos);
-                            Action::Move {
-                                point,
-                                message: format!("[at]shortest"),
-                            }
-                        }
+                        info.controlled_monster_id.insert(m.id);
+                        ret.push((
+                            *hero_id,
+                            Action::Control {
+                                entity_id: m.id,
+                                point: self.home[0],
+                                message: format!("[at]contorl for future"),
+                            },
+                        ));
                     } else {
-                        // 守備がいるなら、shield を張りたい
-                        if hero.pos.distance(&monster.pos) <= SHIELD_RADIUS && solver.can_spell(board, false) {
-                            // そうでなければ shield で包む
-                            solver.spell_count += 1;
-                            Action::Shield {
-                                entity_id: monster.id,
-                                message: format!("[at]shield"),
-                            }
-                        } else {
-                            let (_, point) = self.shortest_move(&monster, &hero.pos);
+                        ret.push((
+                            *hero_id,
                             Action::Move {
-                                point,
-                                message: format!("[at]shortest"),
-                            }
-                        }
-                    }
-                } else {
-                    // 敵が見つけられなかったら、go home
-                    Action::Move {
-                        point: self.home,
-                        message: format!("[at]home 2"),
+                                point: self.home[*hero_id],
+                                message: format!("[at]go home"),
+                            },
+                        ));
                     }
                 }
-            })
-            .collect::<Vec<_>>();
-        hero_list
-            .iter()
-            .zip(action_list.into_iter())
-            .map(|(&i, a)| (i, a))
-            .collect::<Vec<_>>()
-    }
+                ret
+            }
+            AttackerInnerState::Attack => {
+                // - 以下の行動列が敵に邪魔されうるか否かを判定したい
+                //   - 味方 hero 1 が前方に monster を打つ
+                //   - 味方 hero 2 が所定の場所に (move / wind / control)
+                //   - 味方 hero 1 & 2 が WIND !
+                // - 自由変数
+                //   1. どの monster を選択するか
+                //     - hero 1 との距離が WIND 圏内
+                //     - 敵 base からの距離が 6900 以内
+                //   2. hero 1 が初手でどの位置に monster を投げるか
+                //     - hero 2 が1手の move で 2手目の WIND を打てる範囲内
+                //     - hero 1 が2手目の WIND を打てる範囲内(hero2からの距離が WIND_RAD + HERO_VELOCITY 以内)
+                //     - 敵 base からの距離が 4700 以内
+                //     - 敵味方関係なく hero の攻撃範囲外である
+                //     - [memo] hero 1 がどこに移動するかについては、上記を満たせば適当な場所に移動すればよさそう
+                // - 原理的に間に合うか否かの判定
+                //   - 1手目を防がれなければ2手目を防ぎようがない
+                //   - ということは、1手目を防げない程遠い位置にいれば OK
+                //     - 1手目の hero の WIND 圏外にいる
+                // - 探索アルゴリズム
+                //
+                vec![
+                    (
+                        0,
+                        Action::Move {
+                            point: self.home[0],
+                            message: format!("go home"),
+                        },
+                    ),
+                    (
+                        1,
+                        Action::Move {
+                            point: self.home[1],
+                            message: format!("go home"),
+                        },
+                    ),
+                ]
+            }
+        };
 
-    fn shortest_move(&self, m: &Monster, pos: &IPoint) -> (i32, IPoint) {
-        // FIXME: 共通化
-        (1, m.next_pos())
+        if let AttackerInnerState::GoHome(_) = self.inner_state {
+            if hero_list
+                .iter()
+                .all(|hero_id| self.home[*hero_id].distance2(&board.player.hero_list[*hero_id].pos) == 0)
+            {
+                self.inner_state = AttackerInnerState::Attack;
+            }
+        }
+
+        ret
     }
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(Copy, Clone)]
 struct DefenderInfo {
     home: IPoint,
 }
@@ -1015,7 +991,7 @@ impl DefenderInfo {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
 enum HeroState {
     CollectMana(CollectManaInfo),
     Attacker(AttackerInfo),
@@ -1101,10 +1077,6 @@ impl Solver {
                 previous_position: vec![IPoint::new(); 3],
             },
         }
-    }
-
-    fn hero_size(&self) -> usize {
-        self.hero_state.len()
     }
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
