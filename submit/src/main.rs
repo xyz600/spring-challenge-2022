@@ -71,41 +71,225 @@ macro_rules! input_old {
     };
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-struct Point {
-    y: i32,
-    x: i32,
+pub trait Zero {
+    fn zero() -> Self;
 }
 
-impl Point {
-    fn new() -> Point {
-        Point { y: 0, x: 0 }
+impl Zero for f64 {
+    fn zero() -> Self {
+        0.0
+    }
+}
+
+impl Zero for i32 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+pub trait One {
+    fn one() -> Self;
+}
+
+impl One for f64 {
+    fn one() -> Self {
+        1.0
+    }
+}
+
+impl One for i32 {
+    fn one() -> Self {
+        1
+    }
+}
+
+pub trait Number:
+    One
+    + Zero
+    + std::ops::Add<Self, Output = Self>
+    + std::ops::Sub<Self, Output = Self>
+    + std::ops::Div<Self, Output = Self>
+    + std::ops::Mul<Self, Output = Self>
+    + std::ops::Neg<Output = Self>
+    + std::marker::Sized
+    + Clone
+    + Copy
+    + PartialOrd
+    + PartialEq
+{
+    fn two() -> Self;
+
+    fn to_f64(self) -> f64;
+
+    fn from_f64(val: f64) -> Self;
+
+    fn min(self, val: Self) -> Self;
+
+    fn max(self, val: Self) -> Self;
+}
+
+impl Number for i32 {
+    fn two() -> Self {
+        2
     }
 
-    fn distance2(&self, other: &Point) -> i32 {
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+
+    fn from_f64(val: f64) -> Self {
+        // FIXME: is round necessary ?
+        val.round() as Self
+    }
+
+    fn min(self, val: Self) -> Self {
+        if self < val {
+            self
+        } else {
+            val
+        }
+    }
+
+    fn max(self, val: Self) -> Self {
+        if self > val {
+            self
+        } else {
+            val
+        }
+    }
+}
+impl Number for f64 {
+    fn two() -> Self {
+        2.0
+    }
+
+    fn to_f64(self) -> f64 {
+        self
+    }
+
+    fn from_f64(val: f64) -> Self {
+        val
+    }
+
+    fn min(self, val: Self) -> Self {
+        if self < val {
+            self
+        } else {
+            val
+        }
+    }
+
+    fn max(self, val: Self) -> Self {
+        if self > val {
+            self
+        } else {
+            val
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct Point<T>
+where
+    T: Number,
+{
+    pub y: T,
+    pub x: T,
+}
+
+impl Point<f64> {
+    fn to<T>(&self) -> Point<T>
+    where
+        T: Number,
+    {
+        Point {
+            y: T::from_f64(self.y),
+            x: T::from_f64(self.x),
+        }
+    }
+
+    fn rotate(&self, dir: f64) -> Point<f64> {
+        let c = dir.cos();
+        let s = dir.sin();
+
+        let nx = c * self.x - s * self.y;
+        let ny = s * self.x + c * self.y;
+        Point { y: ny, x: nx }
+    }
+}
+
+impl<T> Point<T>
+where
+    T: Number,
+{
+    pub fn flip(&self) -> Point<T> {
+        Point { y: -self.y, x: -self.x }
+    }
+
+    pub fn normalize(self) -> Self {
+        self / self.norm()
+    }
+
+    pub fn to_f64(self) -> Point<f64> {
+        Point {
+            y: T::to_f64(self.y),
+            x: T::to_f64(self.x),
+        }
+    }
+
+    pub fn min(self, p: &Point<T>) -> Point<T> {
+        Point {
+            y: self.y.min(p.y),
+            x: self.x.min(p.x),
+        }
+    }
+
+    pub fn max(self, p: &Point<T>) -> Point<T> {
+        Point {
+            y: self.y.max(p.y),
+            x: self.x.max(p.x),
+        }
+    }
+
+    pub fn new() -> Point<T> {
+        Point {
+            y: T::zero(),
+            x: T::zero(),
+        }
+    }
+
+    pub fn distance2(&self, other: &Point<T>) -> T {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         dx * dx + dy * dy
     }
 
-    fn distance(&self, other: &Point) -> i32 {
-        (self.distance2(other) as f64).sqrt().ceil() as i32
+    pub fn distance(&self, other: &Point<T>) -> T {
+        T::from_f64(self.to_f64().distance2(&other.to_f64()).sqrt().floor())
     }
 
-    fn norm2(&self) -> i32 {
+    pub fn norm2(&self) -> T {
         self.x * self.x + self.y * self.y
     }
 
-    fn norm(&self) -> i32 {
-        (self.norm2() as f64).sqrt().ceil() as i32
+    pub fn norm(&self) -> T {
+        T::from_f64(self.to_f64().norm2().sqrt().floor())
     }
 
-    fn point_symmetry(&self, center: &Point) -> Point {
-        *center * 2 - *self
+    pub fn point_symmetry(&self, center: &Point<T>) -> Point<T> {
+        *center * T::two() - *self
+    }
+
+    pub fn in_range(&self, p: &Point<T>, radius: T) -> bool {
+        return p.distance2(&self) <= radius * radius;
+    }
+
+    pub fn cross(&self, p: &Point<T>) -> T {
+        self.x * p.y - self.y * p.x
     }
 }
 
-impl std::ops::Add<Self> for Point {
+impl<T: Number> std::ops::Add<Self> for Point<T> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -116,7 +300,7 @@ impl std::ops::Add<Self> for Point {
     }
 }
 
-impl std::ops::Sub<Self> for Point {
+impl<T: Number> std::ops::Sub<Self> for Point<T> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -127,10 +311,10 @@ impl std::ops::Sub<Self> for Point {
     }
 }
 
-impl std::ops::Div<i32> for Point {
+impl<T: Number> std::ops::Div<T> for Point<T> {
     type Output = Self;
 
-    fn div(self, rhs: i32) -> Self::Output {
+    fn div(self, rhs: T) -> Self::Output {
         Point {
             x: self.x / rhs,
             y: self.y / rhs,
@@ -138,16 +322,19 @@ impl std::ops::Div<i32> for Point {
     }
 }
 
-impl std::ops::Mul<i32> for Point {
+impl<T: Number> std::ops::Mul<T> for Point<T> {
     type Output = Self;
 
-    fn mul(self, rhs: i32) -> Self::Output {
+    fn mul(self, rhs: T) -> Self::Output {
         Point {
             x: self.x * rhs,
             y: self.y * rhs,
         }
     }
 }
+
+pub type IPoint = Point<i32>;
+pub type FPoint = Point<f64>;
 
 #[derive(Debug)]
 struct Board {
@@ -172,7 +359,7 @@ impl Board {
 struct Player {
     health: i32,
     mana: i32,
-    base: Point,
+    base: IPoint,
     hero_list: Vec<Hero>,
 }
 
@@ -182,7 +369,7 @@ impl Player {
             health: 0,
             mana: 0,
             hero_list: vec![],
-            base: Point::new(),
+            base: IPoint::new(),
         }
     }
 }
@@ -190,7 +377,7 @@ impl Player {
 #[derive(Debug)]
 struct Hero {
     id: i32,
-    pos: Point,
+    pos: IPoint,
     shield_life: i32,    // not use
     is_controlled: bool, // not use
 }
@@ -251,16 +438,16 @@ impl MonsterThreatState {
 #[derive(Debug)]
 struct Monster {
     id: i32,
-    pos: Point,
+    pos: IPoint,
     shield_life: i32,    // not use
     is_controlled: bool, // not use
     health: i32,
-    v: Point,
+    v: IPoint,
     threat_state: MonsterThreatState,
 }
 
 impl Monster {
-    fn next_pos(&self) -> Point {
+    fn next_pos(&self) -> IPoint {
         self.pos + self.v
     }
 }
@@ -271,11 +458,11 @@ enum Action {
         message: String,
     },
     Move {
-        point: Point,
+        point: IPoint,
         message: String,
     },
     Wind {
-        point: Point,
+        point: IPoint,
         message: String,
     },
     Shield {
@@ -284,25 +471,25 @@ enum Action {
     },
     Control {
         entity_id: i32,
-        point: Point,
+        point: IPoint,
         message: String,
     },
 }
 
 #[derive(PartialEq, Copy, Clone)]
 struct CollectManaInfo {
-    home: Point,
+    home: IPoint,
 }
 
 impl CollectManaInfo {
-    fn calculate_home_to_collect_mana(base_pos: &Point, hero_id: usize) -> Point {
+    fn calculate_home_to_collect_mana(base_pos: &IPoint, hero_id: usize) -> IPoint {
         if hero_id == 0 {
-            Point {
+            IPoint {
                 x: MAX_X * 6 / 10,
                 y: MAX_Y * 6 / 10,
             }
         } else if hero_id == 1 {
-            Point {
+            IPoint {
                 x: MAX_X * 4 / 10,
                 y: MAX_Y * 4 / 10,
             }
@@ -311,11 +498,11 @@ impl CollectManaInfo {
             let radius = DETECT_BASE_RADIUS as f64;
             let dx = (rad.cos() * radius) as i32;
             let dy = (rad.sin() * radius) as i32;
-            *base_pos + Point { x: dx, y: dy }
+            *base_pos + IPoint { x: dx, y: dy }
         }
     }
 
-    fn new(base_pos: &Point, hero_id: usize) -> CollectManaInfo {
+    fn new(base_pos: &IPoint, hero_id: usize) -> CollectManaInfo {
         CollectManaInfo {
             home: Self::calculate_home_to_collect_mana(base_pos, hero_id),
         }
@@ -446,10 +633,10 @@ impl CollectManaInfo {
         }
     }
 
-    fn enumerate_multiple_hit(&self, board: &Board, hero_id: usize) -> Vec<(usize, Point)> {
+    fn enumerate_multiple_hit(&self, board: &Board, hero_id: usize) -> Vec<(usize, IPoint)> {
         let mut ret = vec![];
 
-        let enable = |p: &Point| board.player.base.distance(p) > DETECT_BASE_RADIUS + 3000;
+        let enable = |p: &IPoint| board.player.base.distance(p) > DETECT_BASE_RADIUS + 3000;
 
         // 3点 hit
         for m1 in board.monster_list.iter() {
@@ -490,7 +677,7 @@ impl CollectManaInfo {
         ret
     }
 
-    fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
+    fn shortest_move(&self, m: &Monster, pos: &IPoint) -> (i32, IPoint) {
         // FIXME: 共通化
         (1, m.next_pos())
     }
@@ -501,7 +688,7 @@ impl CollectManaInfo {
         board: &Board,
         hero_id: usize,
         target: &Monster,
-    ) -> Vec<(usize, Point)> {
+    ) -> Vec<(usize, IPoint)> {
         let mut ret = vec![];
 
         // 3点 hit
@@ -543,7 +730,7 @@ impl CollectManaInfo {
 
 #[derive(PartialEq, Copy, Clone)]
 struct AttackerInfo {
-    home: Point,
+    home: IPoint,
     idle_counter: usize,
     home_shifted: bool,
 }
@@ -551,7 +738,7 @@ struct AttackerInfo {
 impl AttackerInfo {
     fn new() -> AttackerInfo {
         AttackerInfo {
-            home: Point {
+            home: IPoint {
                 x: MAX_X - 2000,
                 y: MAX_Y - 2000,
             },
@@ -560,39 +747,42 @@ impl AttackerInfo {
         }
     }
 
-    fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
-        let hero = &board.player.hero_list[hero_id];
-
-        // home にしばらく居座っていたら、手前で防御されている可能性が高いので、home を少し上にずらす
-        if !self.home_shifted && self.home == hero.pos {
-            self.idle_counter += 1;
-
-            if self.idle_counter == 10 {
-                self.home_shifted = true;
-                self.home.x -= 1000;
-                self.home.y -= 1000;
-            }
-        } else {
-            self.idle_counter = 0;
-        }
-
-        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
-            solver.spell_count += 1;
-            Action::Shield {
-                entity_id: hero.id,
-                message: format!("[at]shield self!"),
-            }
-        } else if self.home.distance(&hero.pos) > 4000 {
-            Action::Move {
-                point: self.home,
-                message: format!("[at]home 1"),
-            }
-        } else if board
-            .opponent
-            .hero_list
+    fn action(&mut self, board: &Board, hero_list: &Vec<usize>, solver: &mut SolverState) -> Vec<(usize, Action)> {
+        let action_list = hero_list
             .iter()
-            .filter(|op_h| {
-                op_h.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS + 1000
+            .map(|&hero_id| -> Action {
+                let hero = &board.player.hero_list[hero_id];
+
+                // home にしばらく居座っていたら、手前で防御されている可能性が高いので、home を少し上にずらす
+                if !self.home_shifted && self.home == hero.pos {
+                    self.idle_counter += 1;
+
+                    if self.idle_counter == 10 {
+                        self.home_shifted = true;
+                        self.home.x -= 1000;
+                        self.home.y -= 1000;
+                    }
+                } else {
+                    self.idle_counter = 0;
+                }
+
+                if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
+                    solver.spell_count += 1;
+                    Action::Shield {
+                        entity_id: hero.id,
+                        message: format!("[at]shield self!"),
+                    }
+                } else if self.home.distance(&hero.pos) > 4000 {
+                    Action::Move {
+                        point: self.home,
+                        message: format!("[at]home 1"),
+                    }
+                } else if board
+                    .opponent
+                    .hero_list
+                    .iter()
+                    .filter(|op_h| {
+                        op_h.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS + 1000
                     && op_h.shield_life == 0
                     && board
                         .monster_list
@@ -607,203 +797,113 @@ impl AttackerInfo {
                         .filter(|m| m.threat_state.threat_opponent() && m.health >= 6)
                         .count()
                         > 0
-            })
-            .count()
-            > 0
-        {
-            // 相手陣地に十分な monster がいるので、妨害が最善
-            // 相手陣地付近にいる 敵 hero を遠ざけ続ける
-            let op_hero = board
-                .opponent
-                .hero_list
-                .iter()
-                .filter(|op_h| op_h.shield_life == 0)
-                .min_by_key(|op_h| op_h.pos.distance(&board.opponent.base))
-                .unwrap();
-            if op_hero.pos.distance(&hero.pos) <= CONTROL_RADIUS && solver.can_spell(board, false) {
-                solver.spell_count += 1;
-                Action::Control {
-                    entity_id: op_hero.id,
-                    point: op_hero.pos * 2 - board.opponent.base,
-                    message: format!("[at]op control"),
-                }
-            } else {
-                Action::Move {
-                    point: op_hero.pos,
-                    message: format!("[at]op_h shortest"),
-                }
-            }
-        } else if let Some(monster) = board
-            .monster_list
-            .iter()
-            .filter(|m| {
-                m.shield_life == 0
-                    && m.threat_state.threat_opponent()
-                    && m.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS
-            })
-            .min_by_key(|m| hero.pos.distance(&m.pos))
-        {
-            // 相手ゴール前ががら空き
-            if board
-                .opponent
-                .hero_list
-                .iter()
-                .filter(|h| h.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS)
-                .count()
-                == 0
-            {
-                if hero.pos.distance(&monster.pos) <= WIND_RADIUS && solver.can_spell(board, false) {
-                    // wind の方が到達速度が速そう
-                    solver.spell_count += 1;
-                    Action::Shield {
-                        entity_id: monster.id,
-                        message: format!("[at]shield"),
-                    }
-                } else {
-                    let (_, point) = self.shortest_move(&monster, &hero.pos);
-                    Action::Move {
-                        point,
-                        message: format!("[at]shortest"),
-                    }
-                }
-            } else {
-                // 守備がいるなら、shield を張りたい
-                if hero.pos.distance(&monster.pos) <= SHIELD_RADIUS && solver.can_spell(board, false) {
-                    // そうでなければ shield で包む
-                    solver.spell_count += 1;
-                    Action::Shield {
-                        entity_id: monster.id,
-                        message: format!("[at]shield"),
-                    }
-                } else {
-                    let (_, point) = self.shortest_move(&monster, &hero.pos);
-                    Action::Move {
-                        point,
-                        message: format!("[at]shortest"),
-                    }
-                }
-            }
-        } else {
-            // 敵が見つけられなかったら、go home
-            Action::Move {
-                point: self.home,
-                message: format!("[at]home 2"),
-            }
-        }
-    }
-
-    fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
-        // FIXME: 共通化
-        (1, m.next_pos())
-    }
-}
-
-#[derive(PartialEq, Clone)]
-struct MidFielderInfo {
-    home: Point,
-    assisted: HashSet<i32>,
-}
-
-impl MidFielderInfo {
-    fn new() -> MidFielderInfo {
-        MidFielderInfo {
-            home: Point {
-                y: MAX_Y - 5500,
-                x: MAX_X - 5500,
-            },
-            assisted: HashSet::new(),
-        }
-    }
-
-    fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
-        let hero = &board.player.hero_list[hero_id];
-
-        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
-            // 敵が邪魔をしてくるやつで、シールドが切れたら張り直す
-            solver.spell_count += 1;
-            Action::Shield {
-                entity_id: hero.id,
-                message: format!("[as]shield self!"),
-            }
-        } else if self.home.distance(&hero.pos) > 4000 {
-            // 前線に十分近くなければ、前線へ移動を優先
-            Action::Move {
-                point: self.home,
-                message: format!("[as]home 1"),
-            }
-        } else if let Some(target) = board
-            .monster_list
-            .iter()
-            .filter(|m| {
-                DETECT_BASE_RADIUS <= m.pos.distance(&board.opponent.base)
-                    && hero.pos.distance(&m.pos) <= HERO_RECOGNIZABLE_RADIUS
-                    && !m.threat_state.threat_opponent()
-                    && m.shield_life == 0
-                    && board
+                    })
+                    .count()
+                    > 0
+                {
+                    // 相手陣地に十分な monster がいるので、妨害が最善
+                    // 相手陣地付近にいる 敵 hero を遠ざけ続ける
+                    let op_hero = board
                         .opponent
                         .hero_list
                         .iter()
-                        .filter(|op_h| op_h.pos.distance(&m.pos) <= ATTACK_HIT_RADIUS)
+                        .filter(|op_h| op_h.shield_life == 0)
+                        .min_by_key(|op_h| op_h.pos.distance(&board.opponent.base))
+                        .unwrap();
+                    if op_hero.pos.distance(&hero.pos) <= CONTROL_RADIUS && solver.can_spell(board, false) {
+                        solver.spell_count += 1;
+                        Action::Control {
+                            entity_id: op_hero.id,
+                            point: op_hero.pos * 2 - board.opponent.base,
+                            message: format!("[at]op control"),
+                        }
+                    } else {
+                        Action::Move {
+                            point: op_hero.pos,
+                            message: format!("[at]op_h shortest"),
+                        }
+                    }
+                } else if let Some(monster) = board
+                    .monster_list
+                    .iter()
+                    .filter(|m| {
+                        m.shield_life == 0
+                            && m.threat_state.threat_opponent()
+                            && m.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS
+                    })
+                    .min_by_key(|m| hero.pos.distance(&m.pos))
+                {
+                    // 相手ゴール前ががら空き
+                    if board
+                        .opponent
+                        .hero_list
+                        .iter()
+                        .filter(|h| h.pos.distance(&board.opponent.base) < DETECT_BASE_RADIUS)
                         .count()
                         == 0
-                    && m.health >= 10
+                    {
+                        if hero.pos.distance(&monster.pos) <= WIND_RADIUS && solver.can_spell(board, false) {
+                            // wind の方が到達速度が速そう
+                            solver.spell_count += 1;
+                            Action::Shield {
+                                entity_id: monster.id,
+                                message: format!("[at]shield"),
+                            }
+                        } else {
+                            let (_, point) = self.shortest_move(&monster, &hero.pos);
+                            Action::Move {
+                                point,
+                                message: format!("[at]shortest"),
+                            }
+                        }
+                    } else {
+                        // 守備がいるなら、shield を張りたい
+                        if hero.pos.distance(&monster.pos) <= SHIELD_RADIUS && solver.can_spell(board, false) {
+                            // そうでなければ shield で包む
+                            solver.spell_count += 1;
+                            Action::Shield {
+                                entity_id: monster.id,
+                                message: format!("[at]shield"),
+                            }
+                        } else {
+                            let (_, point) = self.shortest_move(&monster, &hero.pos);
+                            Action::Move {
+                                point,
+                                message: format!("[at]shortest"),
+                            }
+                        }
+                    }
+                } else {
+                    // 敵が見つけられなかったら、go home
+                    Action::Move {
+                        point: self.home,
+                        message: format!("[at]home 2"),
+                    }
+                }
             })
-            .min_by_key(|m| hero.pos.distance(&m.pos))
-        {
-            // CONTROL 中に wind されると、方向を変えないので control が無駄になってしまう
-
-            if hero.pos.distance(&target.pos) < CONTROL_RADIUS && solver.can_spell(board, false) {
-                solver.spell_count += 1;
-
-                let edge_list = [
-                    Point {
-                        x: MAX_X + MAX_MONSTER_VELOCITY - DETECT_BASE_RADIUS,
-                        y: MAX_Y - MAX_MONSTER_VELOCITY,
-                    },
-                    Point {
-                        x: MAX_X - MAX_MONSTER_VELOCITY,
-                        y: MAX_Y + MAX_MONSTER_VELOCITY - DETECT_BASE_RADIUS,
-                    },
-                ];
-
-                let goal = edge_list.iter().min_by_key(|p| p.distance(&hero.pos)).unwrap();
-                // control で送る
-                solver.midfielder_countrol_count += 1;
-                Action::Control {
-                    entity_id: target.id,
-                    point: *goal,
-                    message: format!("[as]control"),
-                }
-            } else {
-                // 近い monster に近づく
-                let (turn, point) = self.shortest_move(&target, &hero.pos);
-                Action::Move {
-                    point,
-                    message: format!("[as]shortest"),
-                }
-            }
-        } else {
-            Action::Move {
-                point: self.home,
-                message: format!("[as]home 2"),
-            }
-        }
+            .collect::<Vec<_>>();
+        hero_list
+            .iter()
+            .zip(action_list.into_iter())
+            .map(|(&i, a)| (i, a))
+            .collect::<Vec<_>>()
     }
 
-    fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
+    fn shortest_move(&self, m: &Monster, pos: &IPoint) -> (i32, IPoint) {
+        // FIXME: 共通化
         (1, m.next_pos())
     }
 }
 
 #[derive(PartialEq, Copy, Clone)]
 struct DefenderInfo {
-    home: Point,
+    home: IPoint,
 }
 
 impl DefenderInfo {
     fn new() -> DefenderInfo {
         DefenderInfo {
-            home: Point { y: 3000, x: 3000 },
+            home: IPoint { y: 3000, x: 3000 },
         }
     }
     fn action(&mut self, board: &Board, hero_id: usize, solver: &mut SolverState) -> Action {
@@ -864,7 +964,7 @@ impl DefenderInfo {
         }
     }
 
-    fn shortest_move(&self, m: &Monster, pos: &Point) -> (i32, Point) {
+    fn shortest_move(&self, m: &Monster, pos: &IPoint) -> (i32, IPoint) {
         // FIXME: 共通化
         (1, m.next_pos())
     }
@@ -875,7 +975,7 @@ impl DefenderInfo {
         board: &Board,
         hero_id: usize,
         target: &Monster,
-    ) -> Vec<(usize, Point)> {
+    ) -> Vec<(usize, IPoint)> {
         let mut ret = vec![];
 
         // 3点 hit
@@ -919,7 +1019,6 @@ impl DefenderInfo {
 enum HeroState {
     CollectMana(CollectManaInfo),
     Attacker(AttackerInfo),
-    MidFielder(MidFielderInfo),
     Defender(DefenderInfo),
 }
 
@@ -940,8 +1039,7 @@ struct SolverState {
 
     strategy_changed: bool,
 
-    // 相手の戦略概要の推測
-    opponent_strategy: OpponentStrategyType,
+    previous_position: Vec<IPoint>,
 }
 
 impl SolverState {
@@ -955,8 +1053,20 @@ impl SolverState {
 }
 
 #[derive(Clone)]
+struct HeroGroupState {
+    hero_list: Vec<usize>,
+    hero_state: HeroState,
+}
+
+impl HeroGroupState {
+    fn action(&self, board: &Board) -> Vec<(usize, Action)> {
+        vec![]
+    }
+}
+
+#[derive(Clone)]
 struct Solver {
-    hero_state: Vec<HeroState>,
+    hero_state: Vec<HeroGroupState>,
     solver_state: SolverState,
 }
 
@@ -975,17 +1085,20 @@ const ATTACK_HIT_RADIUS: i32 = 800;
 const HERO_RECOGNIZABLE_RADIUS: i32 = 2200;
 
 impl Solver {
-    fn new(base_pos: &Point, hero_size: usize) -> Solver {
+    fn new(base_pos: &IPoint, hero_size: usize) -> Solver {
         Solver {
             hero_state: (0..hero_size)
-                .map(|hero_id| HeroState::CollectMana(CollectManaInfo::new(base_pos, hero_id)))
+                .map(|hero_id| HeroGroupState {
+                    hero_list: vec![hero_id],
+                    hero_state: HeroState::CollectMana(CollectManaInfo::new(base_pos, hero_id)),
+                })
                 .collect::<Vec<_>>(),
             solver_state: SolverState {
                 is_opponent_speller: [false; 3],
                 spell_count: 0,
                 midfielder_countrol_count: 0,
                 strategy_changed: false,
-                opponent_strategy: OpponentStrategyType::NotEstimated,
+                previous_position: vec![IPoint::new(); 3],
             },
         }
     }
@@ -996,6 +1109,12 @@ impl Solver {
 
     fn solve(&mut self, board: &Board) -> Vec<Action> {
         let start = Instant::now();
+
+        if board.turn == 1 {
+            for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
+                self.solver_state.previous_position[hero_id] = hero.pos;
+            }
+        }
 
         eprintln!("{:?}", self.solver_state);
         eprintln!("self hero");
@@ -1014,18 +1133,34 @@ impl Solver {
         self.solver_state.spell_count = 0;
 
         for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
-            if hero.is_controlled {
+            // WIND を使われているかは、直前の場所との距離で判断
+            if hero.is_controlled
+                || !self.solver_state.previous_position[hero_id].in_range(&hero.pos, WIND_RADIUS - 100)
+            {
+                eprintln!(
+                    "prev: {:?}, next: {:?}",
+                    self.solver_state.previous_position[hero_id], hero.pos
+                );
                 self.solver_state.is_opponent_speller[hero_id] = true;
             }
         }
 
-        let ret = (0..self.hero_size())
-            .map(|hero_id| -> Action {
-                match &mut self.hero_state[hero_id] {
-                    HeroState::CollectMana(info) => info.action(board, hero_id, &mut self.solver_state),
-                    HeroState::Attacker(info) => info.action(board, hero_id, &mut self.solver_state),
-                    HeroState::MidFielder(info) => info.action(board, hero_id, &mut self.solver_state),
-                    HeroState::Defender(info) => info.action(board, hero_id, &mut self.solver_state),
+        let mut ret = self
+            .hero_state
+            .iter_mut()
+            .flat_map(|group_state| -> Vec<(usize, Action)> {
+                match &mut group_state.hero_state {
+                    HeroState::CollectMana(info) => {
+                        vec![(
+                            group_state.hero_list[0],
+                            info.action(board, group_state.hero_list[0], &mut self.solver_state),
+                        )]
+                    }
+                    HeroState::Attacker(info) => info.action(board, &group_state.hero_list, &mut self.solver_state),
+                    HeroState::Defender(info) => vec![(
+                        group_state.hero_list[0],
+                        info.action(board, group_state.hero_list[0], &mut self.solver_state),
+                    )],
                 }
             })
             .collect::<Vec<_>>();
@@ -1035,15 +1170,26 @@ impl Solver {
             || (board.player.mana - board.opponent.mana >= 100)
         {
             self.solver_state.strategy_changed = true;
-            self.hero_state[0] = HeroState::Attacker(AttackerInfo::new());
-            self.hero_state[1] = HeroState::MidFielder(MidFielderInfo::new());
-            self.hero_state[2] = HeroState::Defender(DefenderInfo::new());
+            self.hero_state.clear();
+            self.hero_state.push(HeroGroupState {
+                hero_list: vec![0, 1],
+                hero_state: HeroState::Attacker(AttackerInfo::new()),
+            });
+            self.hero_state.push(HeroGroupState {
+                hero_list: vec![2],
+                hero_state: HeroState::Defender(DefenderInfo::new()),
+            });
         }
 
         let elapsed = (Instant::now() - start).as_millis();
         eprintln!("elapsed: {}[ms]", elapsed);
 
-        ret
+        for (hero_id, hero) in board.player.hero_list.iter().enumerate() {
+            self.solver_state.previous_position[hero_id] = hero.pos;
+        }
+
+        ret.sort_by_key(|e| e.0);
+        ret.into_iter().map(|e| e.1).collect()
     }
 }
 
@@ -1057,8 +1203,8 @@ fn main() {
 
     // 色々面倒なので、player が left になるように盤面を点対称に移動させる
     // 出力する座標も、これを見て点対称に移動させる
-    let point_symmetry_when_necessary = |p: Point| {
-        let center = Point {
+    let point_symmetry_when_necessary = |p: IPoint| {
+        let center = IPoint {
             x: MAX_X / 2,
             y: MAX_Y / 2,
         };
@@ -1071,8 +1217,8 @@ fn main() {
         }
     };
 
-    let velocity_symmetry_when_necessary = |v: Point| {
-        let center = Point {
+    let velocity_symmetry_when_necessary = |v: IPoint| {
+        let center = IPoint {
             x: MAX_X / 2,
             y: MAX_Y / 2,
         };
@@ -1080,12 +1226,12 @@ fn main() {
         if is_left {
             v
         } else {
-            Point { x: -v.x, y: -v.y }
+            IPoint { x: -v.x, y: -v.y }
         }
     };
 
     let mut solver = Solver::new(
-        &point_symmetry_when_necessary(Point { x: base_x, y: base_y }),
+        &point_symmetry_when_necessary(IPoint { x: base_x, y: base_y }),
         heroes_per_player,
     );
 
@@ -1106,11 +1252,11 @@ fn main() {
             if i == 0 {
                 board.player.health = health;
                 board.player.mana = mana;
-                board.player.base = point_symmetry_when_necessary(Point { x: base_x, y: base_y });
+                board.player.base = point_symmetry_when_necessary(IPoint { x: base_x, y: base_y });
             } else {
                 board.opponent.health = health;
                 board.opponent.mana = mana;
-                board.opponent.base = point_symmetry_when_necessary(Point {
+                board.opponent.base = point_symmetry_when_necessary(IPoint {
                     x: MAX_X - base_x,
                     y: MAX_Y - base_y,
                 });
@@ -1140,10 +1286,10 @@ fn main() {
             if entity_type == 0 {
                 let monster = Monster {
                     health,
-                    v: velocity_symmetry_when_necessary(Point { x: vx, y: vy }),
+                    v: velocity_symmetry_when_necessary(IPoint { x: vx, y: vy }),
                     threat_state: MonsterThreatState::to_threat_state(near_base, threat_for),
                     id,
-                    pos: point_symmetry_when_necessary(Point { x, y }),
+                    pos: point_symmetry_when_necessary(IPoint { x, y }),
                     shield_life,
                     is_controlled: is_controlled == 1,
                 };
@@ -1151,7 +1297,7 @@ fn main() {
             } else if entity_type == 1 {
                 let hero = Hero {
                     id,
-                    pos: point_symmetry_when_necessary(Point { x, y }),
+                    pos: point_symmetry_when_necessary(IPoint { x, y }),
                     shield_life,
                     is_controlled: is_controlled == 1,
                 };
@@ -1159,7 +1305,7 @@ fn main() {
             } else if entity_type == 2 {
                 let hero = Hero {
                     id,
-                    pos: point_symmetry_when_necessary(Point { x, y }),
+                    pos: point_symmetry_when_necessary(IPoint { x, y }),
                     shield_life,
                     is_controlled: is_controlled == 1,
                 };
