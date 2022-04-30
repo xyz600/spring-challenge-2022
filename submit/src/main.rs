@@ -796,9 +796,9 @@ impl AttackerInfo {
             })
             .collect::<Vec<_>>();
         if !decided && !target.is_empty() && board.player.mana >= 40 {
-            if let Some(point) = self.decide_wind_target(&board, &target, hero0, hero1) {
+            if let Some((point, h1_point)) = self.decide_wind_target(&board, &target, hero0, hero1) {
                 decided = true;
-                eprintln!("[at2] p = {:?}", point);
+                eprintln!("[at2] p = {:?}", target[0]);
 
                 // hero 0 は WIND する target を決定
                 ret[0] = Action::Wind {
@@ -807,7 +807,7 @@ impl AttackerInfo {
                 };
                 // hero 1 は 次の WIND に備えて位置取り
                 ret[1] = Action::Move {
-                    point,
+                    point: h1_point,
                     message: format!("[at2] move for dw"),
                 }
             }
@@ -829,7 +829,7 @@ impl AttackerInfo {
                         && expected_h0.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
                         && expected_h1.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 1))
                     {
-                        eprintln!("[at3] np = {:?}", np);
+                        eprintln!("[at3] np = {:?}, turn = {}", np, turn);
                         decided = true;
                         self.counter = 0;
                         self.go_home = false;
@@ -880,7 +880,7 @@ impl AttackerInfo {
                             && m.health > 10
                         {
                             decided = true;
-                            eprintln!("[at4] target: {:?}", nnp);
+                            eprintln!("[at4] target: {:?}, turn = {}", nnp, turn);
                             ret[0] = Action::Control {
                                 entity_id: m.id,
                                 point: nnp,
@@ -926,8 +926,15 @@ impl AttackerInfo {
         ret.into_iter().enumerate().collect::<Vec<_>>()
     }
 
-    fn decide_wind_target(&self, board: &Board, monster: &Vec<&Monster>, hero0: &Hero, hero1: &Hero) -> Option<IPoint> {
+    fn decide_wind_target(
+        &self,
+        board: &Board,
+        monster: &Vec<&Monster>,
+        hero0: &Hero,
+        hero1: &Hero,
+    ) -> Option<(IPoint, IPoint)> {
         let mut best_pos = IPoint::new();
+        let mut best_h1_pos = IPoint::new();
         let mut best_eval = 0;
         // 1°刻みで実際に飛ばして、よさそうな場所を採用
         for rad in 0..360 {
@@ -947,10 +954,11 @@ impl AttackerInfo {
             if eval > best_eval {
                 best_eval = eval;
                 best_pos = hero0.pos + diff;
+                best_h1_pos = monster[0].pos + diff;
             }
         }
         if best_eval > 0 {
-            Some(best_pos)
+            Some((best_pos, best_h1_pos))
         } else {
             None
         }
