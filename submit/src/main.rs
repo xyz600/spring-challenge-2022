@@ -686,11 +686,11 @@ impl AttackerInfo {
         AttackerInfo {
             home: [
                 IPoint {
-                    x: MAX_X - 5600,
+                    x: MAX_X - 6600,
                     y: MAX_Y - 1000,
                 },
                 IPoint {
-                    x: MAX_X - 5000,
+                    x: MAX_X - 6000,
                     y: MAX_Y - 1000,
                 },
             ],
@@ -725,6 +725,9 @@ impl AttackerInfo {
         // - 速攻が成立するかを判定したい
         //   - 3人の hero の所在がすべて見えている
         //   - ソロのドリブルを相手が止める手段があるか否かを判定
+
+        // FIXME: マナが切れたら、流石にマナを一定程度貯める動作をしないとね
+        // 40 + 20 * (残りhp - 1) 位は貯めたいかな？
 
         let mut ret = vec![
             Action::Move {
@@ -813,6 +816,11 @@ impl AttackerInfo {
                     continue;
                 }
                 for m in board.monster_list.iter() {
+                    // 近くに敵 hero がいる場合は対象外
+                    if decided {
+                        continue;
+                    }
+
                     let np = m.pos + m.v * turn;
                     let expected_h0 = np + IPoint { x: 1100, y: 0 };
                     let expected_h1 = expected_h0 + IPoint { x: 600, y: 0 };
@@ -837,58 +845,55 @@ impl AttackerInfo {
                         };
                     }
                 }
-            }
-        }
 
-        // 4. 2手で double wind attack の1段目まで持っていける(うち初手は control)場合は、control
-        // 2手先を読んで、double wind できそうなら control する
-        if !decided {
-            for turn in 1..6 {
-                if decided {
-                    break;
-                }
-                for m in board.monster_list.iter() {
-                    if decided {
-                        break;
-                    }
-                    // 2手目は control で rad でどこに飛ばせばいいかは全探索
-                    for rad in 0..360 {
+                if turn >= 2 {
+                    let turn = turn - 1;
+                    // 4. 2手で double wind attack の1段目まで持っていける(うち初手は control)場合は、control
+                    // 2手先を読んで、double wind できそうなら control する
+                    for m in board.monster_list.iter() {
+                        // 近くに敵 hero がいる場合は対象外
                         if decided {
                             break;
                         }
-                        let rad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
-                        let dir = (FPoint {
-                            x: rad.cos(),
-                            y: rad.sin(),
-                        } * (MAX_MONSTER_VELOCITY as f64))
-                            .to::<i32>();
-                        let nnp = m.next_pos() + dir * turn;
-                        let expected_hero0_pos = nnp + IPoint { x: 1100, y: 0 };
-                        let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
+                        // 2手目は control で rad でどこに飛ばせばいいかは全探索
+                        for rad in 0..360 {
+                            if decided {
+                                break;
+                            }
+                            let rad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
+                            let dir = (FPoint {
+                                x: rad.cos(),
+                                y: rad.sin(),
+                            } * (MAX_MONSTER_VELOCITY as f64))
+                                .to::<i32>();
+                            let nnp = m.next_pos() + dir * turn;
+                            let expected_hero0_pos = nnp + IPoint { x: 1100, y: 0 };
+                            let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
 
-                        if board.player.mana >= 50
-                            && !nnp.in_range(&board.opponent.base, DETECT_BASE_RADIUS)
-                            && board.in_board(&nnp)
-                            && hero0.pos.in_range(&m.pos, CONTROL_RADIUS)
-                            && nnp.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
-                            && expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
-                            && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 2))
-                            && m.health > 10
-                            && !self.controlled.contains(&m.id)
-                        {
-                            self.controlled.insert(m.id);
-                            decided = true;
-                            eprintln!("[at4] target: {:?}, turn = {}", nnp, turn);
-                            ret[0] = Action::Control {
-                                entity_id: m.id,
-                                point: nnp,
-                                message: format!("[at4] control monster"),
-                            };
-                            ret[1] = Action::Move {
-                                point: expected_hero1_pos,
-                                message: format!("[at4] move"),
-                            };
-                            break;
+                            if board.player.mana >= 50
+                                && !nnp.in_range(&board.opponent.base, DETECT_BASE_RADIUS)
+                                && board.in_board(&nnp)
+                                && hero0.pos.in_range(&m.pos, CONTROL_RADIUS)
+                                && nnp.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
+                                && expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
+                                && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 2))
+                                && m.health > 10
+                                && !self.controlled.contains(&m.id)
+                            {
+                                self.controlled.insert(m.id);
+                                decided = true;
+                                eprintln!("[at4] target: {:?}, turn = {}", nnp, turn);
+                                ret[0] = Action::Control {
+                                    entity_id: m.id,
+                                    point: nnp,
+                                    message: format!("[at4] control monster"),
+                                };
+                                ret[1] = Action::Move {
+                                    point: expected_hero1_pos,
+                                    message: format!("[at4] move"),
+                                };
+                                break;
+                            }
                         }
                     }
                 }
