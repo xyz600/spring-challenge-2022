@@ -345,13 +345,8 @@ struct Board {
 }
 
 impl Board {
-    fn monster(&self, monster_id: i32) -> Option<&Monster> {
-        for m in self.monster_list.iter() {
-            if m.id == monster_id {
-                return Some(m);
-            }
-        }
-        None
+    fn in_board(&self, p: &IPoint) -> bool {
+        0 <= p.x && p.x <= MAX_X && 0 <= p.y && p.y <= MAX_Y
     }
 }
 
@@ -498,13 +493,13 @@ impl CollectManaInfo {
     fn calculate_home_to_collect_mana(base_pos: &IPoint, hero_id: usize) -> IPoint {
         if hero_id == 0 {
             IPoint {
-                x: MAX_X * 6 / 10,
-                y: MAX_Y * 6 / 10,
+                x: MAX_X / 2,
+                y: MAX_Y - 1000,
             }
         } else if hero_id == 1 {
             IPoint {
-                x: MAX_X * 4 / 10,
-                y: MAX_Y * 4 / 10,
+                x: MAX_X / 2 - 4000,
+                y: MAX_Y - 1000,
             }
         } else {
             let rad = std::f64::consts::PI / 4.0;
@@ -527,13 +522,7 @@ impl CollectManaInfo {
         let point = self.home;
         let candidate = self.enumerate_multiple_hit(board, hero_id);
 
-        if hero.shield_life == 0 && solver.can_spell(board, false) && solver.is_opponent_speller[hero_id] {
-            solver.spell_count += 1;
-            return Action::Shield {
-                entity_id: hero.id,
-                message: format!("[m2]shield self!"),
-            };
-        } else if candidate.is_empty() {
+        if candidate.is_empty() {
             // 候補がなければ自分の home に向かう
             Action::Move {
                 point,
@@ -675,7 +664,7 @@ impl AttackerAttractMonsterInfo {
         AttackerAttractMonsterInfo {
             // 勧誘する場所
             center: IPoint {
-                x: MAX_X - 6000,
+                x: MAX_X - 6500,
                 y: MAX_Y - 1000,
             },
             counter: 0,
@@ -689,6 +678,7 @@ struct AttackerInfo {
     home: [IPoint; 2],
     go_home: bool,
     counter: i32,
+    controlled: HashSet<i32>,
 }
 
 impl AttackerInfo {
@@ -706,6 +696,7 @@ impl AttackerInfo {
             ],
             go_home: false,
             counter: 0,
+            controlled: HashSet::new(),
         }
     }
 
@@ -817,7 +808,7 @@ impl AttackerInfo {
         // 3. 1手以内で double wind attack の1段目まで持っていける場合は、そのように移動
         // monster を一通り見て、1手先の場所で double wind できそうならそこに移動して強制終了する
         if !decided {
-            for turn in 1..4 {
+            for turn in 1..6 {
                 if decided {
                     continue;
                 }
@@ -827,6 +818,8 @@ impl AttackerInfo {
                     let expected_h1 = expected_h0 + IPoint { x: 600, y: 0 };
 
                     if np.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
+                        && !np.in_range(&board.opponent.base, DETECT_BASE_RADIUS)
+                        && board.in_board(&np)
                         && expected_h0.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
                         && expected_h1.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 1))
                     {
@@ -850,7 +843,7 @@ impl AttackerInfo {
         // 4. 2手で double wind attack の1段目まで持っていける(うち初手は control)場合は、control
         // 2手先を読んで、double wind できそうなら control する
         if !decided {
-            for turn in 1..4 {
+            for turn in 1..6 {
                 if decided {
                     break;
                 }
@@ -874,12 +867,16 @@ impl AttackerInfo {
                         let expected_hero1_pos = expected_hero0_pos + IPoint { x: 600, y: 0 };
 
                         if board.player.mana >= 50
+                            && !nnp.in_range(&board.opponent.base, DETECT_BASE_RADIUS)
+                            && board.in_board(&nnp)
                             && hero0.pos.in_range(&m.pos, CONTROL_RADIUS)
                             && nnp.in_range(&board.opponent.base, FIRST_WIND_ATTACK_THREASHOLD)
                             && expected_hero0_pos.in_range(&hero0.pos, MAX_PLAYER_VELOCITY * turn)
                             && expected_hero1_pos.in_range(&hero1.pos, MAX_PLAYER_VELOCITY * (turn + 2))
                             && m.health > 10
+                            && !self.controlled.contains(&m.id)
                         {
+                            self.controlled.insert(m.id);
                             decided = true;
                             eprintln!("[at4] target: {:?}, turn = {}", nnp, turn);
                             ret[0] = Action::Control {
@@ -1335,7 +1332,7 @@ impl Solver {
         }
 
         // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
-        if !self.solver_state.strategy_changed && board.player.mana >= 200 {
+        if !self.solver_state.strategy_changed && board.player.mana >= 150 {
             self.solver_state.strategy_changed = true;
             // 防御だけ残しておく
             self.hero_state.retain(|g| g.hero_list[0] == 2);
