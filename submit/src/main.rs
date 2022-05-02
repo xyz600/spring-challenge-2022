@@ -744,6 +744,7 @@ impl AttackerInfo {
 
         let hero0 = &board.player.hero_list[0];
         let hero1 = &board.player.hero_list[1];
+        eprintln!("{:?} {:?}", hero0, hero1);
 
         // home に着いたら 勧誘開始
         if hero0.pos.distance2(&self.home[0]) == 0 {
@@ -760,6 +761,11 @@ impl AttackerInfo {
                     && m.pos.in_range(&hero0.pos, WIND_RADIUS)
                     && m.pos.in_range(&hero1.pos, WIND_RADIUS)
                     && !m.will_dead(board)
+                    && board // Wind attack が敵に妨害される可能性があるなら、20マナがもったいないので緊急中止
+                        .opponent
+                        .hero_list
+                        .iter()
+                        .all(|op_h| !op_h.pos.in_range(&m.pos, WIND_ATTACK_MARGIN))
             })
             .collect::<Vec<_>>();
 
@@ -817,7 +823,7 @@ impl AttackerInfo {
                 }
                 for m in board.monster_list.iter() {
                     // 近くに敵 hero がいる場合は対象外
-                    if decided {
+                    if m.health <= 6 || decided {
                         continue;
                     }
 
@@ -857,8 +863,8 @@ impl AttackerInfo {
                         }
                         // 2手目は control で rad でどこに飛ばせばいいかは全探索
                         for rad in 0..360 {
-                            if decided {
-                                break;
+                            if m.health <= 6 || decided {
+                                continue;
                             }
                             let rad = std::f64::consts::PI * 2.0 * (rad as f64) / 360.0;
                             let dir = (FPoint {
@@ -1108,12 +1114,12 @@ impl DefenderInfo {
                     point,
                     message: format!("[def]2 wind"),
                 }
-            } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller[hero_id] {
-                solver.spell_count += 1;
-                Action::Shield {
-                    entity_id: hero.id,
-                    message: format!("shield self!"),
-                }
+            // } else if hero.shield_life == 0 && solver.can_spell(board, true) && solver.is_opponent_speller[hero_id] {
+            //     solver.spell_count += 1;
+            //     Action::Shield {
+            //         entity_id: hero.id,
+            //         message: format!("shield self!"),
+            //     }
             } else if hero.pos.distance(&monster.pos) <= ATTACK_HIT_RADIUS {
                 // 攻撃が当たるなら、マナの収集効率が良い場所を見つける
                 let candidate = self.enumerate_multiple_hit_with_target(board, hero_id, monster);
@@ -1131,9 +1137,23 @@ impl DefenderInfo {
                 }
             }
         } else {
-            Action::Move {
-                point: self.home,
-                message: format!("[def]go home"),
+            // 敵の hero が陣地内にいるなら、そこに近づく
+            if let Some(op_h) = board
+                .opponent
+                .hero_list
+                .iter()
+                .filter(|op_h| op_h.pos.in_range(&board.player.base, DETECT_BASE_RADIUS))
+                .min_by_key(|op_h| op_h.pos.distance(&board.player.base))
+            {
+                Action::Move {
+                    point: op_h.pos,
+                    message: format!("[def]go opponent"),
+                }
+            } else {
+                Action::Move {
+                    point: self.home,
+                    message: format!("[def]go home"),
+                }
             }
         }
     }
@@ -1339,6 +1359,22 @@ impl Solver {
         // 相手に比べてマナがたくさんある || 十分マナが揃ったら攻撃態勢
         if !self.solver_state.strategy_changed && board.player.mana >= 150 {
             self.solver_state.strategy_changed = true;
+            // 防御だけ残しておく
+            self.hero_state.retain(|g| g.hero_list[0] == 2);
+            self.hero_state.push(HeroGroupState {
+                hero_list: vec![0, 1],
+                hero_state: HeroState::Attacker(AttackerInfo::new()),
+            });
+        } else if self.solver_state.strategy_changed && board.player.mana < 30 {
+            // 防御だけ残しておく
+            self.hero_state.retain(|g| g.hero_list[0] == 2);
+            for hero_id in 0..2 {
+                self.hero_state.push(HeroGroupState {
+                    hero_list: vec![hero_id],
+                    hero_state: HeroState::CollectMana(CollectManaInfo::new(&board.player.base, hero_id)),
+                });
+            }
+        } else if self.solver_state.strategy_changed && board.player.mana >= 40 {
             // 防御だけ残しておく
             self.hero_state.retain(|g| g.hero_list[0] == 2);
             self.hero_state.push(HeroGroupState {
