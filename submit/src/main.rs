@@ -559,7 +559,11 @@ impl CollectManaInfo {
     fn enumerate_multiple_hit(&self, board: &Board, hero_id: usize) -> Vec<(usize, IPoint)> {
         let mut ret = vec![];
 
-        let enable = |p: &IPoint| board.player.base.distance(p) > DETECT_BASE_RADIUS + 3000;
+        let enable = |p: &IPoint| {
+            // マナが溜まり始めてきたら、自陣近くでマナを集めてターン数短縮したい
+            (board.player.mana >= 130 || board.player.hero_list[hero_id].pos.in_range(&self.home, 3000))
+                && board.player.base.distance(p) > DETECT_BASE_RADIUS + 3000
+        };
 
         // 3点 hit
         for m1 in board.monster_list.iter() {
@@ -765,7 +769,7 @@ impl AttackerInfo {
                         .opponent
                         .hero_list
                         .iter()
-                        .all(|op_h| !op_h.pos.in_range(&m.pos, WIND_ATTACK_MARGIN))
+                        .all(|op_h| !op_h.pos.in_range(&m.pos, WIND_RADIUS))
             })
             .collect::<Vec<_>>();
 
